@@ -16,7 +16,7 @@ import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.SparkSession;
-import org.apache.spark.util.LongAccumulator;
+import org.apache.spark.storage.StorageLevel;
 import scala.Tuple2;
 
 /**
@@ -38,14 +38,18 @@ public class BlockFiltering {
 
     //resulting key:blockID, value:entityIds array                            
     private JavaPairRDD<String,String[]> parseBlockCollection(JavaRDD<String> blockingInput) {
+        System.out.println("Parsing the blocking collection...");
         return blockingInput
             .map(line -> line.split("\t")) //split to [blockId, [entityIds]]
             .filter(line -> line.length == 2) //only keep lines of this format
             .mapToPair(line -> new Tuple2<String,String[]>(line[0], line[1].replaceFirst(";", "").split("#"))); 
     }
     
+    //input: a JavaPairRDD of key:blockID, value:entityIds array        
+    //outpu: a JavaPairRDD of key:inverseUtility (=max of D1 entities, D2 entities in this block), value:blockId (=input key)
     public JavaPairRDD<Integer,Integer> getBlockSizes(JavaPairRDD<String,String[]> parsedBlocks) {
-        LongAccumulator numComparisons = JavaSparkContext.fromSparkContext(spark.sparkContext()).sc().longAccumulator();
+        System.out.println("Getting the block sizes...");
+        //LongAccumulator numComparisons = JavaSparkContext.fromSparkContext(spark.sparkContext()).sc().longAccumulator();
         return parsedBlocks         
             .mapToPair(pair -> {
                 int blockId = Integer.parseInt(pair._1());
@@ -64,7 +68,7 @@ public class BlockFiltering {
                 }
                 int D2counter = numEntities-D1counter;
                 long blockComparisons = D1counter * D2counter;
-                numComparisons.add(blockComparisons);
+                //numComparisons.add(blockComparisons);
                 
                 int inverseUtility = Math.max(D1counter, D2counter);
                 if (blockComparisons == 0) {
@@ -78,6 +82,7 @@ public class BlockFiltering {
     }
         
     private void getEntityIndex(JavaPairRDD<String,String[]> parsedBlocks, JavaPairRDD<Integer,Integer> blockSizes) {
+        System.out.println("Creating the entity index...");
         //get pairs of the form (entityId, blockId)
         JavaPairRDD<Integer, Integer> entityIndexMapperResult = parsedBlocks
             .flatMapToPair(pair -> {
@@ -116,20 +121,20 @@ public class BlockFiltering {
                     return new Tuple2<Integer,Integer[]>(pair._1(), entityIndex); //the entity index for the current entity
                 })                
                 .saveAsObjectFile(entityIndexOutputPath);
-                //.saveAsTextFile(entityIndexOutputPath);
+//                .saveAsTextFile(entityIndexOutputPath);
                 //.saveAsNewAPIHadoopFile(entityIndexOutputPath, VIntWritable.class, VIntArrayWritable.class, SequenceFileOutputFormat.class);                
     }
     
         
     public void run(JavaRDD<String> blockingInput) {        
         JavaPairRDD<String,String[]> parsedBlocks = parseBlockCollection(blockingInput);
-        parsedBlocks.cache();
+        parsedBlocks.persist(StorageLevel.MEMORY_AND_DISK_SER());
         
         JavaPairRDD<Integer,Integer> blockSizes = getBlockSizes(parsedBlocks);
         blockSizes.cache();        
-        blockSizes
-                .map(x -> x._1()+","+ x._2())         //to remove the parentheses
-                .saveAsTextFile(blockSizesOutputPath);     
+//        blockSizes
+//                .map(x -> x._1()+","+ x._2())         //to remove the parentheses
+//                .saveAsTextFile(blockSizesOutputPath);     
         getEntityIndex(parsedBlocks, blockSizes);
     }
         
@@ -180,12 +185,13 @@ public class BlockFiltering {
         SparkSession spark = SparkSession.builder()
             .appName("BlockFiltering")
             .config("spark.sql.warehouse.dir", tmpPath)
+            .config("spark.eventLog.enabled", true)
             .master(master)
             .getOrCreate();        
         
         JavaSparkContext sc = JavaSparkContext.fromSparkContext(spark.sparkContext());
         BlockFiltering bf = new BlockFiltering(spark, blockSizesOutputPath, entityIndexOutputPath);
-        bf.run(sc.textFile(inputPath));
+        bf.run(sc.textFile(inputPath)); //input: a blocking collection
     }
     
 }
