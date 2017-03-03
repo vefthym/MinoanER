@@ -37,8 +37,8 @@ public class BlocksFromEntityIndex {
         numComparisons = JavaSparkContext.fromSparkContext(spark.sparkContext()).sc().longAccumulator();
     }
     
-    public void run() {
-        entityIndex.flatMapToPair(x -> 
+    public JavaPairRDD<Integer, Iterable<Integer>> run() {
+        return entityIndex.flatMapToPair(x -> 
             {
                 List<Tuple2<Integer,Integer>> mapResults = new ArrayList<>();
                 for (int blockId : x._2()) {
@@ -70,11 +70,7 @@ public class BlocksFromEntityIndex {
                     return true;
                 }
                 return false;
-            });
-    }
-    
-    public static void main(String[] args) {
-        
+            });              
     }
     
 }

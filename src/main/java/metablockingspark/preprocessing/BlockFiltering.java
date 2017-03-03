@@ -2,16 +2,13 @@ package metablockingspark.preprocessing;
 
 import com.google.common.collect.Ordering;
 import java.io.IOException;
-import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
+import metablockingspark.utils.Utils;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
@@ -37,33 +34,43 @@ public class BlockFiltering {
     }
 
     //resulting key:blockID, value:entityIds array                            
-    private JavaPairRDD<String,String[]> parseBlockCollection(JavaRDD<String> blockingInput) {
+    private JavaPairRDD<Integer,Integer[]> parseBlockCollection(JavaRDD<String> blockingInput) {
         System.out.println("Parsing the blocking collection...");
         return blockingInput
             .map(line -> line.split("\t")) //split to [blockId, [entityIds]]
             .filter(line -> line.length == 2) //only keep lines of this format
-            .mapToPair(line -> new Tuple2<String,String[]>(line[0], line[1].replaceFirst(";", "").split("#"))); 
+            .mapToPair(pair -> {                
+                int blockId = Integer.parseInt(pair[0]);
+                String[] entities = pair[1].replaceFirst(";", "").split("#");
+                if (entities == null || entities.length == 0) {
+                    return null;
+                }
+                List<Integer> outputEntities = new ArrayList<>(); //possible (but not really probable) cause of OOM (memory errors) if huge blocks exist
+                for (String entity : entities) {
+                    if (entity.isEmpty()) continue; //in case the last entityId finishes with '#'
+                    Integer entityId = Integer.parseInt(entity);			                    
+                    outputEntities.add(entityId);
+                }
+                return new Tuple2<Integer, Integer[]>(blockId, outputEntities.toArray(new Integer[outputEntities.size()]));
+            })
+            .filter(x -> x != null);
     }
     
     //input: a JavaPairRDD of key:blockID, value:entityIds array        
     //outpu: a JavaPairRDD of key:inverseUtility (=max of D1 entities, D2 entities in this block), value:blockId (=input key)
-    public JavaPairRDD<Integer,Integer> getBlockSizes(JavaPairRDD<String,String[]> parsedBlocks) {
+    public JavaPairRDD<Integer,Integer> getBlockSizes(JavaPairRDD<Integer,Integer[]> parsedBlocks) {
         System.out.println("Getting the block sizes...");
         //LongAccumulator numComparisons = JavaSparkContext.fromSparkContext(spark.sparkContext()).sc().longAccumulator();
         return parsedBlocks         
             .mapToPair(pair -> {
-                int blockId = Integer.parseInt(pair._1());
-                String[] entities = pair._2();
-                if (entities == null || entities.length == 0) {
-                    return null;
-                }
+                int blockId = pair._1();
+                Integer[] entities = pair._2();
+                
                 int numEntities = entities.length;
                 int D1counter = 0;
-                for (String entity : entities) {
-                    if (entity.isEmpty()) continue; //in case the last entityId finishes with '#'
-                    Integer entityId = Integer.parseInt(entity);			                    
-                    if (entityId >= 0) {
-                            D1counter++;
+                for (int entity : entities) {                                        
+                    if (entity >= 0) {
+                        D1counter++;
                     } 
                 }
                 int D2counter = numEntities-D1counter;
@@ -81,31 +88,29 @@ public class BlockFiltering {
             .sortByKey(false, 1); //save in descending utility order //TODO: check numPartitions      
     }
         
-    private void getEntityIndex(JavaPairRDD<String,String[]> parsedBlocks, JavaPairRDD<Integer,Integer> blockSizes) {
+    private JavaPairRDD<Integer, Integer[]> getEntityIndex(JavaPairRDD<Integer,Integer[]> parsedBlocks, JavaPairRDD<Integer,Integer> blockSizes) {
         System.out.println("Creating the entity index...");
         //get pairs of the form (entityId, blockId)
         JavaPairRDD<Integer, Integer> entityIndexMapperResult = parsedBlocks
             .flatMapToPair(pair -> {
-                int blockId = Integer.parseInt(pair._1());
-                String[] entities = pair._2();
-                if (entities == null || entities.length == 0) {
-                    return null;
-                }
+                int blockId = pair._1();
+                Integer[] entities = pair._2();
+                
                 List<Tuple2<Integer,Integer>> mapResults = new ArrayList<>(); //possible (but not really probable) cause of OOM (memory errors) if huge blocks exist
-                for (String entity : entities) {
-                    if (entity.isEmpty()) continue; //in case the last entityId finishes with '#'
-                    Integer entityId = Integer.parseInt(entity);			                    
-                    mapResults.add(new Tuple2<>(entityId, blockId));
+                for (int entity : entities) {                    
+                    mapResults.add(new Tuple2<>(entity, blockId));
                 }
                 return mapResults.iterator();
             }); //end of EntityIndexMapper logic 
 
         //add an integer rank to each blockId, starting with 0 (blocks are sorted in descending utility)
         Map<Integer,Long> blocksRanking = blockSizes.values().zipWithIndex().collectAsMap(); 
+//        JavaPairRDD<Integer,Long> blocksRankingRDD = blockSizes.values().zipWithIndex(); 
         
         //create the entity index (similar to EntityIndexReducer)
-        entityIndexMapperResult
+        return entityIndexMapperResult
                 .mapValues(x -> blocksRanking.get(x)) //replace all block Ids with their rank in the sorted list of blocks (by descending utility)
+//                .mapValues(x -> blocksRankingRDD.lookup(x).get(0)) //alternative
                 .groupByKey()                
                 .mapValues(iter -> Ordering.natural().sortedCopy(iter)) //order the blocks of each entity by their rank (highest utility first)
                 .mapToPair(pair -> {
@@ -119,15 +124,15 @@ public class BlockFiltering {
                     Integer[] entityIndex = new Integer[blocksKept.size()];
                     entityIndex = blocksKept.toArray(entityIndex);
                     return new Tuple2<Integer,Integer[]>(pair._1(), entityIndex); //the entity index for the current entity
-                })                
-                .saveAsObjectFile(entityIndexOutputPath);
+                });                
+                //.saveAsObjectFile(entityIndexOutputPath);
 //                .saveAsTextFile(entityIndexOutputPath);
                 //.saveAsNewAPIHadoopFile(entityIndexOutputPath, VIntWritable.class, VIntArrayWritable.class, SequenceFileOutputFormat.class);                
     }
     
         
-    public void run(JavaRDD<String> blockingInput) {        
-        JavaPairRDD<String,String[]> parsedBlocks = parseBlockCollection(blockingInput);
+    public JavaPairRDD<Integer, Integer[]> run(JavaRDD<String> blockingInput) {        
+        JavaPairRDD<Integer,Integer[]> parsedBlocks = parseBlockCollection(blockingInput);
         parsedBlocks.persist(StorageLevel.MEMORY_AND_DISK_SER());
         
         JavaPairRDD<Integer,Integer> blockSizes = getBlockSizes(parsedBlocks);
@@ -135,18 +140,9 @@ public class BlockFiltering {
 //        blockSizes
 //                .map(x -> x._1()+","+ x._2())         //to remove the parentheses
 //                .saveAsTextFile(blockSizesOutputPath);     
-        getEntityIndex(parsedBlocks, blockSizes);
+        return getEntityIndex(parsedBlocks, blockSizes);
     }
-        
     
-    private static void deletePath(String stringPath) throws IOException, URISyntaxException {
-        Configuration conf = new Configuration();        
-        FileSystem hdfs = FileSystem.get(new URI("hdfs://master:9000"), conf);
-        Path path = new Path(stringPath);
-        if (hdfs.exists(path)) {
-            hdfs.delete(path, true);
-        }
-    }
     
     public static void main(String[] args) {
         String tmpPath;
@@ -171,8 +167,8 @@ public class BlockFiltering {
             
             // delete existing output directories
             try {                
-                deletePath(blockSizesOutputPath);
-                deletePath(entityIndexOutputPath);
+                Utils.deleteHDFSPath(blockSizesOutputPath);
+                Utils.deleteHDFSPath(entityIndexOutputPath);
             } catch (IOException | URISyntaxException ex) {
                 Logger.getLogger(BlockFiltering.class.getName()).log(Level.SEVERE, null, ex);
             }
@@ -191,7 +187,8 @@ public class BlockFiltering {
         
         JavaSparkContext sc = JavaSparkContext.fromSparkContext(spark.sparkContext());
         BlockFiltering bf = new BlockFiltering(spark, blockSizesOutputPath, entityIndexOutputPath);
-        bf.run(sc.textFile(inputPath)); //input: a blocking collection
+        JavaPairRDD<Integer, Integer[]> entityIndex = bf.run(sc.textFile(inputPath)); //input: a blocking collection
+        entityIndex.saveAsObjectFile(entityIndexOutputPath);
     }
     
 }
