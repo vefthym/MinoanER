@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package workflow;
+package metablockingspark.workflow;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -33,6 +33,7 @@ import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.storage.StorageLevel;
+import org.apache.spark.util.LongAccumulator;
 
 /**
  *
@@ -81,7 +82,8 @@ public class FullMetaBlockingWorkflow {
             .master(master)
             .getOrCreate();        
         
-        JavaSparkContext sc = JavaSparkContext.fromSparkContext(spark.sparkContext());
+        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());        
+        LongAccumulator BLOCK_ASSIGNMENTS = jsc.sc().longAccumulator();
         
         //Block Filtering
         System.out.println("\n\nStarting BlockFiltering, reading from "+inputPath+
@@ -89,7 +91,7 @@ public class FullMetaBlockingWorkflow {
                 " and entity index to "+entityIndexOutputPath);
         
         BlockFiltering bf = new BlockFiltering(spark, blockSizesOutputPath, entityIndexOutputPath);
-        JavaPairRDD<Integer,Integer[]> entityIndex = bf.run(sc.textFile(inputPath)); 
+        JavaPairRDD<Integer,Integer[]> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS); 
         entityIndex.cache();
         //entityIndex.persist(StorageLevel.DISK_ONLY_2()); //store to disk with replication factor 2
         //TODO: check if entityIndex fits in memory (to cache it) or not (to store it in disk)
@@ -112,13 +114,18 @@ public class FullMetaBlockingWorkflow {
         //blocks per entity not needed for WJS (perhaps another task is needed to get totalWeights of entities (for each of their tokens)
         EntityWeightsWJS wjsWeights = new EntityWeightsWJS(spark, blocksFromEI, entityIndex);
         Map<Integer,Double> totalWeights = wjsWeights.getWeights(); //double[] cannot be used, because some entityIds are negative
-        Broadcast<Map<Integer,Double>> totalWeightsBV = sc.broadcast(totalWeights);
+        Broadcast<Map<Integer,Double>> totalWeightsBV = jsc.broadcast(totalWeights);
         
-        final int K = 0; //TODO: k = BCin
+        double BCin = (double) BLOCK_ASSIGNMENTS.value() / entityIndex.count(); //BCin = average number of block assignments per entity
+        final int K = ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
+        
+        entityIndex.unpersist();
         
         //CNP
         EntityBasedCNP cnp = new EntityBasedCNP(spark,blocksFromEI, totalWeightsBV, K);
-        cnp.run();
+        JavaPairRDD<Integer,Integer[]> metablockingResults = cnp.run();
+        
+        metablockingResults.collect(); //TODO: remove
     }
     
 }

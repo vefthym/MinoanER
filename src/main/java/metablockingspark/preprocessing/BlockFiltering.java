@@ -30,6 +30,7 @@ import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.storage.StorageLevel;
+import org.apache.spark.util.LongAccumulator;
 import scala.Tuple2;
 
 /**
@@ -104,7 +105,7 @@ public class BlockFiltering {
             .sortByKey(false, 1); //save in descending utility order //TODO: check numPartitions      
     }
         
-    private JavaPairRDD<Integer, Integer[]> getEntityIndex(JavaPairRDD<Integer,Integer[]> parsedBlocks, JavaPairRDD<Integer,Integer> blockSizes) {
+    private JavaPairRDD<Integer, Integer[]> getEntityIndex(JavaPairRDD<Integer,Integer[]> parsedBlocks, JavaPairRDD<Integer,Integer> blockSizes, LongAccumulator BLOCK_ASSIGNMENTS) {
         System.out.println("Creating the entity index...");
         //get pairs of the form (entityId, blockId)
         JavaPairRDD<Integer, Integer> entityIndexMapperResult = parsedBlocks
@@ -139,6 +140,7 @@ public class BlockFiltering {
                     }
                     Integer[] entityIndex = new Integer[blocksKept.size()];
                     entityIndex = blocksKept.toArray(entityIndex);
+                    BLOCK_ASSIGNMENTS.add(entityIndex.length);
                     return new Tuple2<Integer,Integer[]>(pair._1(), entityIndex); //the entity index for the current entity
                 });                
                 //.saveAsObjectFile(entityIndexOutputPath);
@@ -147,7 +149,7 @@ public class BlockFiltering {
     }
     
         
-    public JavaPairRDD<Integer, Integer[]> run(JavaRDD<String> blockingInput) {        
+    public JavaPairRDD<Integer, Integer[]> run(JavaRDD<String> blockingInput, LongAccumulator BLOCK_ASSIGNMENTS) {        
         JavaPairRDD<Integer,Integer[]> parsedBlocks = parseBlockCollection(blockingInput);
         parsedBlocks.persist(StorageLevel.MEMORY_AND_DISK_SER());
         
@@ -156,7 +158,7 @@ public class BlockFiltering {
 //        blockSizes
 //                .map(x -> x._1()+","+ x._2())         //to remove the parentheses
 //                .saveAsTextFile(blockSizesOutputPath);     
-        return getEntityIndex(parsedBlocks, blockSizes);
+        return getEntityIndex(parsedBlocks, blockSizes, BLOCK_ASSIGNMENTS);
     }
     
     
@@ -201,9 +203,11 @@ public class BlockFiltering {
             .master(master)
             .getOrCreate();        
         
-        JavaSparkContext sc = JavaSparkContext.fromSparkContext(spark.sparkContext());
+        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());
+        LongAccumulator BLOCK_ASSIGNMENTS = jsc.sc().longAccumulator();
+        
         BlockFiltering bf = new BlockFiltering(spark, blockSizesOutputPath, entityIndexOutputPath);
-        JavaPairRDD<Integer, Integer[]> entityIndex = bf.run(sc.textFile(inputPath)); //input: a blocking collection
+        JavaPairRDD<Integer, Integer[]> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS); //input: a blocking collection
         entityIndex.saveAsObjectFile(entityIndexOutputPath);
     }
     

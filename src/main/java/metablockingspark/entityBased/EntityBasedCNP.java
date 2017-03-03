@@ -44,7 +44,7 @@ public class EntityBasedCNP {
         this.K = K;
     }
     
-    public void run() {
+    public JavaPairRDD<Integer,Integer[]> run() {
         //map phase
         JavaPairRDD<Integer, Integer[]> mapOutput = blocksFromEI.flatMapToPair(x -> {            
             List<Integer> positives = new ArrayList<>();
@@ -82,7 +82,7 @@ public class EntityBasedCNP {
         
         //reduce phase
         //metaBlockingResults: key: an entityId, value: an array of topK candidate matches, in descending order of score (match likelihood)
-        JavaPairRDD<Integer,Integer[]> metaBlockingResults = mapOutput.groupByKey() //for each entity create an iterable of arrays of candidate matches (one array from each common block)
+        return mapOutput.groupByKey() //for each entity create an iterable of arrays of candidate matches (one array from each common block)
                 .mapToPair(x -> {
                     Integer entityId = x._1();
                     
