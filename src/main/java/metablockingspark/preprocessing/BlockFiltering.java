@@ -49,6 +49,12 @@ public class BlockFiltering {
         this.blockSizesOutputPath = blockSizesOutputPath;
         this.entityIndexOutputPath = entityIndexOutputPath;
     }
+    
+    public BlockFiltering(SparkSession spark) {
+        this.spark = spark;
+        this.blockSizesOutputPath = null;
+        this.entityIndexOutputPath = null;
+    }
 
     //resulting key:blockID, value:entityIds array                            
     private JavaPairRDD<Integer,Integer[]> parseBlockCollection(JavaRDD<String> blockingInput) {
@@ -171,7 +177,7 @@ public class BlockFiltering {
         if (args.length == 0) {
             System.setProperty("hadoop.home.dir", "C:\\Users\\VASILIS\\Documents\\hadoop_home"); //only for local mode
             
-            tmpPath = "/file:C:/temp";
+            tmpPath = "/file:C:\\tmp";
             master = "local[2]";
             inputPath = "/file:C:\\Users\\VASILIS\\Documents\\MetaBlocking\\testInput";
             blockSizesOutputPath = "/file:C:\\Users\\VASILIS\\Documents\\MetaBlocking\\testOutputBlockSizes";

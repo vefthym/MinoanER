@@ -32,19 +32,16 @@ import scala.Tuple2;
  */
 public class EntityBasedCNP {
 
-    SparkSession spark; 
-    JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI; 
-    Map<Integer,Double> totalWeights; //used only for WJS
-    final int K; //for topK: the (maximum) number of candidate matches to keep
+    SparkSession spark;     
 
-    public EntityBasedCNP(SparkSession spark, JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, Broadcast<Map<Integer,Double>> totalWeightsBV, int K) {
-        this.spark = spark;
-        this.blocksFromEI = blocksFromEI;
-        totalWeights = totalWeightsBV.value(); //check if totalWeightsBV is null
-        this.K = K;
+    public EntityBasedCNP(SparkSession spark) {
+        this.spark = spark;        
     }
     
-    public JavaPairRDD<Integer,Integer[]> run() {
+    public JavaPairRDD<Integer,Integer[]> run(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, Broadcast<Map<Integer,Double>> totalWeightsBV, int K) {
+        
+        Map<Integer,Double> totalWeights = totalWeightsBV.value();
+        
         //map phase
         JavaPairRDD<Integer, Integer[]> mapOutput = blocksFromEI.flatMapToPair(x -> {            
             List<Integer> positives = new ArrayList<>();

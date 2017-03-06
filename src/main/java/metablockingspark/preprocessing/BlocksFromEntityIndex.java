@@ -34,26 +34,25 @@ public class BlocksFromEntityIndex {
     
     SparkSession spark;
     String blocksFromEIOutputPath;
-    JavaPairRDD<Integer,Integer[]> entityIndex;
-    LongAccumulator cleanBlocksAccum, numComparisons;
+    JavaPairRDD<Integer,Integer[]> entityIndex;    
 
-    public BlocksFromEntityIndex(SparkSession spark, String entityIndexInputPath, String blocksFromEIOutputPath) {
-        this.spark = spark;        
-        this.blocksFromEIOutputPath = blocksFromEIOutputPath;
-        this.entityIndex = JavaPairRDD.fromJavaRDD(JavaSparkContext.fromSparkContext(spark.sparkContext()).objectFile(entityIndexInputPath));
-        cleanBlocksAccum = JavaSparkContext.fromSparkContext(spark.sparkContext()).sc().longAccumulator();
-        numComparisons = JavaSparkContext.fromSparkContext(spark.sparkContext()).sc().longAccumulator();
-    }
-    
     public BlocksFromEntityIndex(SparkSession spark, JavaPairRDD<Integer,Integer[]> entityIndex, String blocksFromEIOutputPath) {
         this.spark = spark;        
         this.entityIndex = entityIndex;
-        this.blocksFromEIOutputPath = blocksFromEIOutputPath;
-        cleanBlocksAccum = JavaSparkContext.fromSparkContext(spark.sparkContext()).sc().longAccumulator();
-        numComparisons = JavaSparkContext.fromSparkContext(spark.sparkContext()).sc().longAccumulator();
+        this.blocksFromEIOutputPath = blocksFromEIOutputPath;        
     }
     
-    public JavaPairRDD<Integer, Iterable<Integer>> run() {
+    public BlocksFromEntityIndex(SparkSession spark, String entityIndexInputPath, String blocksFromEIOutputPath) {
+        this(spark, 
+             JavaPairRDD.fromJavaRDD(JavaSparkContext.fromSparkContext(spark.sparkContext()).objectFile(entityIndexInputPath)), 
+             blocksFromEIOutputPath);
+    }
+    
+    public BlocksFromEntityIndex(SparkSession spark, JavaPairRDD<Integer,Integer[]> entityIndex) {
+        this(spark, entityIndex, null);
+    }
+    
+    public JavaPairRDD<Integer, Iterable<Integer>> run(LongAccumulator cleanBlocksAccum, LongAccumulator numComparisons) {
         return entityIndex.flatMapToPair(x -> 
             {
                 List<Tuple2<Integer,Integer>> mapResults = new ArrayList<>();

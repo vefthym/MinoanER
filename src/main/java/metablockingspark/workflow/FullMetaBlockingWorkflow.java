@@ -18,6 +18,7 @@ package metablockingspark.workflow;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Level;
@@ -46,30 +47,24 @@ public class FullMetaBlockingWorkflow {
     public static void main(String[] args) {
         String tmpPath;
         String master;
-        String inputPath;
-        String blockSizesOutputPath;
-        String entityIndexOutputPath;
-        String blocksFromEIPath = null; //TODO: add
+        String inputPath;        
+        String outputPath;
+        
         if (args.length == 0) {
             System.setProperty("hadoop.home.dir", "C:\\Users\\VASILIS\\Documents\\hadoop_home"); //only for local mode
             
-            tmpPath = "/file:C:/temp";
+            tmpPath = "/file:C:\\tmp";
             master = "local[2]";
-            inputPath = "/file:C:\\Users\\VASILIS\\Documents\\MetaBlocking\\testInput";
-            blockSizesOutputPath = "/file:C:\\Users\\VASILIS\\Documents\\MetaBlocking\\testOutputBlockSizes";
-            entityIndexOutputPath = "/file:C:\\Users\\VASILIS\\Documents\\MetaBlocking\\testOutputEntityIndex";
+            inputPath = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testInput";            
+            outputPath = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testOutput";            
         } else {            
             tmpPath = "/file:/tmp";
             master = "spark://master:7077";
-            inputPath = args[0];
-            blockSizesOutputPath = args[1];
-            entityIndexOutputPath = args[2];            
-            
+            inputPath = args[0];            
+            outputPath = args[1];
             // delete existing output directories
-            try {                
-                Utils.deleteHDFSPath(blockSizesOutputPath);
-                Utils.deleteHDFSPath(entityIndexOutputPath);
-                Utils.deleteHDFSPath(blocksFromEIPath);
+            try {                                
+                Utils.deleteHDFSPath(outputPath);
             } catch (IOException | URISyntaxException ex) {
                 Logger.getLogger(BlockFiltering.class.getName()).log(Level.SEVERE, null, ex);
             }
@@ -83,49 +78,63 @@ public class FullMetaBlockingWorkflow {
             .getOrCreate();        
         
         JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());        
-        LongAccumulator BLOCK_ASSIGNMENTS = jsc.sc().longAccumulator();
+        LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();
+        
+        
+        
+        ////////////////////////
+        //start the processing//
+        ////////////////////////
         
         //Block Filtering
-        System.out.println("\n\nStarting BlockFiltering, reading from "+inputPath+
-                " and writing block sizes to "+blockSizesOutputPath+
-                " and entity index to "+entityIndexOutputPath);
+        System.out.println("\n\nStarting BlockFiltering, reading from "+inputPath);
         
-        BlockFiltering bf = new BlockFiltering(spark, blockSizesOutputPath, entityIndexOutputPath);
-        JavaPairRDD<Integer,Integer[]> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS); 
+        BlockFiltering bf = new BlockFiltering(spark);
+        JavaPairRDD<Integer,Integer[]> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
         entityIndex.cache();
         //entityIndex.persist(StorageLevel.DISK_ONLY_2()); //store to disk with replication factor 2
-        //TODO: check if entityIndex fits in memory (to cache it) or not (to store it in disk)
+        System.out.println(BLOCK_ASSIGNMENTS_ACCUM.value()+" block assignments");
         
         //long numEntities = entityIndex.keys().count();
         
         //Blocks From Entity Index
-        System.out.println("\n\nStarting BlocksFromEntityIndex, reading from "+entityIndexOutputPath+
-                " and writing blocks to "+blocksFromEIPath);
+        System.out.println("\n\nStarting BlocksFromEntityIndex");
                 
-        BlocksFromEntityIndex bFromEI = new BlocksFromEntityIndex(spark, entityIndex, blocksFromEIPath);
-        JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI = bFromEI.run();
+        LongAccumulator CLEAN_BLOCK_ACCUM = jsc.sc().longAccumulator();
+        LongAccumulator NUM_COMPARISONS_ACCUM = jsc.sc().longAccumulator();
         
-        //Blocks Per Entity
+        BlocksFromEntityIndex bFromEI = new BlocksFromEntityIndex(spark, entityIndex);
+        JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI = bFromEI.run(CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
+        
+        System.out.println(CLEAN_BLOCK_ACCUM.value()+" clean blocks");
+        System.out.println(NUM_COMPARISONS_ACCUM.value()+" comparisons");
+        
+        //Blocks Per Entity (not needed for WJS weighting scheme)
         //BlocksPerEntity bpe = new BlocksPerEntity(spark, entityIndex);
         //JavaPairRDD<Integer,Integer> blocksPerEntity = bpe.run();
         //blocksPerEntity.cache();
         //JavaPairRDD<Integer,Integer> blocksPerEntity = entityIndex.mapValues(x-> x.length).cache(); //one-liner to avoid a new class instance
         
-        //blocks per entity not needed for WJS (perhaps another task is needed to get totalWeights of entities (for each of their tokens)
-        EntityWeightsWJS wjsWeights = new EntityWeightsWJS(spark, blocksFromEI, entityIndex);
-        Map<Integer,Double> totalWeights = wjsWeights.getWeights(); //double[] cannot be used, because some entityIds are negative
-        Broadcast<Map<Integer,Double>> totalWeightsBV = jsc.broadcast(totalWeights);
+        //get the total weights of each entity, required by WJS weigthing scheme (only)
+        //Broadcast<JavaPairRDD<Integer, Iterable<Integer>>> blocksFromEI_BV = jsc.broadcast(blocksFromEI);
+        EntityWeightsWJS wjsWeights = new EntityWeightsWJS(spark);
+        Map<Integer,Double> totalWeights = wjsWeights.getWeights(blocksFromEI, entityIndex); //double[] cannot be used, because some entityIds are negative
+        Broadcast<Map<Integer,Double>> totalWeights_BV = jsc.broadcast(totalWeights);
         
-        double BCin = (double) BLOCK_ASSIGNMENTS.value() / entityIndex.count(); //BCin = average number of block assignments per entity
+        double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
         final int K = ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
+        System.out.println("BCin = "+BCin);
+        System.out.println("K = "+K);
         
         entityIndex.unpersist();
         
         //CNP
-        EntityBasedCNP cnp = new EntityBasedCNP(spark,blocksFromEI, totalWeightsBV, K);
-        JavaPairRDD<Integer,Integer[]> metablockingResults = cnp.run();
+        EntityBasedCNP cnp = new EntityBasedCNP(spark);
+        JavaPairRDD<Integer,Integer[]> metablockingResults = cnp.run(blocksFromEI, totalWeights_BV, K);
         
-        metablockingResults.collect(); //TODO: remove
+        metablockingResults
+                .mapValues(x -> Arrays.toString(x)).saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)
+//                .collect(); // only to get the execution time (just an action to trigger the execution)
     }
     
 }

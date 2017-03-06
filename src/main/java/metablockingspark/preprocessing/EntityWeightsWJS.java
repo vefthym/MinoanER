@@ -16,48 +16,43 @@
 
 package metablockingspark.preprocessing;
 
+import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
+import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.SparkSession;
 
 /**
  *
  * @author vefthym
  */
-public class EntityWeightsWJS {
+public class EntityWeightsWJS implements Serializable {
     
-    SparkSession spark; 
-    JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI;
-    JavaPairRDD<Integer,Integer[]> entityIndex;
-    Map<Integer,Double> totalWeights;
-    final long numPositiveEntities;
-    final long numNegativeEntities;
-    
+    SparkSession spark;     
 
-    public EntityWeightsWJS(SparkSession spark, JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, JavaPairRDD<Integer,Integer[]> entityIndex) {
-        this.spark = spark;
-        this.blocksFromEI = blocksFromEI;
-        this.entityIndex = entityIndex;
-        totalWeights = new HashMap<>();
-        
-        JavaRDD<Integer> entityIds = entityIndex.keys().cache();
-        
-        numNegativeEntities = entityIds.filter(x -> x < 0).count();
-        numPositiveEntities = entityIds.count() - numNegativeEntities;
+    public EntityWeightsWJS (SparkSession spark) {
+        this.spark = spark;                       
     }
 
-    public Map<Integer, Double> getWeights() {
-        if (!totalWeights.isEmpty()) {
-            return totalWeights;
-        }
+    public Map<Integer, Double> getWeights(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, JavaPairRDD<Integer,Integer[]> entityIndex) {
+        JavaRDD<Integer> entityIds = entityIndex.keys().cache();
+        
+        Map<Integer, Iterable<Integer>> blocksMap = blocksFromEI.collectAsMap();
+        //JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI = blocksFromEI_BV.value();
+        
+        long numNegativeEntities = entityIds.filter(x -> x < 0).count();
+        long numPositiveEntities = entityIds.count() - numNegativeEntities;
+        
+        Map<Integer,Double> totalWeights = new HashMap<>();
         entityIndex.foreach(entityInfo -> {
             int entityId = entityInfo._1();
             Integer[] associatedBlocks = entityInfo._2();
             if (entityId < 0) {
                 for (int block : associatedBlocks) {
-                    Iterable<Integer> blockContents = blocksFromEI.lookup(block).get(0);
+                    //Iterable<Integer> blockContents = blocksFromEI.lookup(block).get(0);
+                    Iterable<Integer> blockContents = blocksMap.get(block);
                     int df2t = getNumberOfNegativeEntitiesInBlock(blockContents);
                     double weight2 = Math.log10((double) numNegativeEntities / df2t); //IDF
                     Double totalWeight = totalWeights.get(entityId);
@@ -69,7 +64,8 @@ public class EntityWeightsWJS {
                 }
             } else {
                 for (int block : associatedBlocks) {
-                    Iterable<Integer> blockContents = blocksFromEI.lookup(block).get(0);
+                    //Iterable<Integer> blockContents = blocksFromEI.lookup(block).get(0);
+                    Iterable<Integer> blockContents = blocksMap.get(block);
                     int df1t = (int) blockContents.spliterator().getExactSizeIfKnown() - getNumberOfNegativeEntitiesInBlock(blockContents);
                     double weight1 = Math.log10((double) numPositiveEntities / df1t); //IDF
                     Double totalWeight = totalWeights.get(entityId);
