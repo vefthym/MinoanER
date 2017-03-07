@@ -49,7 +49,7 @@ public class EntityWeightsWJS implements Serializable {
         long numNegativeEntities = entityIds.filter(x -> x < 0).count();
         long numPositiveEntities = entityIds.count() - numNegativeEntities;
                        
-        return entityIndex.mapToPair(entityInfo -> {            
+        return entityIndex.mapToPair(entityInfo -> {
             int entityId = entityInfo._1();
             Integer[] associatedBlocks = entityInfo._2();
             double totalWeight = 0;            
