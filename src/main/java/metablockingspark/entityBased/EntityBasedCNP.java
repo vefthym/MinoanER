@@ -98,7 +98,10 @@ public class EntityBasedCNP {
                     //calculate the weights
                     Map<Integer, Double> weights = new HashMap<>();
                     for (int neighborId : counters.keySet()) {
-			double currentWeight = counters.get(neighborId) / (Double.MIN_NORMAL + totalWeights.get(entityId) + totalWeights.get(neighborId));
+			double currentWeight = counters.get(neighborId) / 
+                                (Double.MIN_NORMAL + 
+                                totalWeights.get(entityId) + 
+                                totalWeights.get(neighborId));
 			weights.put(neighborId, currentWeight);			
                     }
                     

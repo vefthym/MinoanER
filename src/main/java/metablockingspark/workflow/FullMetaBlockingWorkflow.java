@@ -19,21 +19,18 @@ package metablockingspark.workflow;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import metablockingspark.entityBased.EntityBasedCNP;
 import metablockingspark.preprocessing.BlockFiltering;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
-import metablockingspark.preprocessing.BlocksPerEntity;
 import metablockingspark.preprocessing.EntityWeightsWJS;
 import metablockingspark.utils.Utils;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.SparkSession;
-import org.apache.spark.storage.StorageLevel;
 import org.apache.spark.util.LongAccumulator;
 
 /**
@@ -93,21 +90,18 @@ public class FullMetaBlockingWorkflow {
         JavaPairRDD<Integer,Integer[]> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
         entityIndex.cache();
         //entityIndex.persist(StorageLevel.DISK_ONLY_2()); //store to disk with replication factor 2
-        System.out.println(BLOCK_ASSIGNMENTS_ACCUM.value()+" block assignments");
+        
         
         //long numEntities = entityIndex.keys().count();
         
         //Blocks From Entity Index
-        System.out.println("\n\nStarting BlocksFromEntityIndex");
+        System.out.println("\n\nStarting BlocksFromEntityIndex...");
                 
         LongAccumulator CLEAN_BLOCK_ACCUM = jsc.sc().longAccumulator();
         LongAccumulator NUM_COMPARISONS_ACCUM = jsc.sc().longAccumulator();
         
         BlocksFromEntityIndex bFromEI = new BlocksFromEntityIndex(spark, entityIndex);
         JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI = bFromEI.run(CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
-        
-        System.out.println(CLEAN_BLOCK_ACCUM.value()+" clean blocks");
-        System.out.println(NUM_COMPARISONS_ACCUM.value()+" comparisons");
         
         //Blocks Per Entity (not needed for WJS weighting scheme)
         //BlocksPerEntity bpe = new BlocksPerEntity(spark, entityIndex);
@@ -117,18 +111,24 @@ public class FullMetaBlockingWorkflow {
         
         //get the total weights of each entity, required by WJS weigthing scheme (only)
         //Broadcast<JavaPairRDD<Integer, Iterable<Integer>>> blocksFromEI_BV = jsc.broadcast(blocksFromEI);
+        System.out.println("\n\nStarting EntityWeightsWJS...");
         EntityWeightsWJS wjsWeights = new EntityWeightsWJS(spark);
         Map<Integer,Double> totalWeights = wjsWeights.getWeights(blocksFromEI, entityIndex); //double[] cannot be used, because some entityIds are negative
+        System.out.println("Total weights contain weights for "+totalWeights.size()+" entities.");
         Broadcast<Map<Integer,Double>> totalWeights_BV = jsc.broadcast(totalWeights);
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
         final int K = ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
+        System.out.println(BLOCK_ASSIGNMENTS_ACCUM.value()+" block assignments");
+        System.out.println(CLEAN_BLOCK_ACCUM.value()+" clean blocks");
+        System.out.println(NUM_COMPARISONS_ACCUM.value()+" comparisons");
         System.out.println("BCin = "+BCin);
         System.out.println("K = "+K);
         
         entityIndex.unpersist();
         
         //CNP
+        System.out.println("\n\nStarting CNP...");
         EntityBasedCNP cnp = new EntityBasedCNP(spark);
         JavaPairRDD<Integer,Integer[]> metablockingResults = cnp.run(blocksFromEI, totalWeights_BV, K);
         
