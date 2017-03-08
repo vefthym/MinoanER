@@ -31,6 +31,7 @@ import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.storage.StorageLevel;
 import org.apache.spark.util.LongAccumulator;
 
 /**
@@ -56,7 +57,7 @@ public class FullMetaBlockingWorkflow {
             outputPath = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testOutput";            
         } else {            
             tmpPath = "/file:/tmp";
-            master = "spark://master:7077";
+            //master = "spark://master:7077";
             inputPath = args[0];            
             outputPath = args[1];
             // delete existing output directories
@@ -68,10 +69,11 @@ public class FullMetaBlockingWorkflow {
         }
                        
         SparkSession spark = SparkSession.builder()
-            .appName("MetaBlocking")
+            .appName("MetaBlocking on "+inputPath.substring(inputPath.lastIndexOf("/")+1))
             .config("spark.sql.warehouse.dir", tmpPath)
             .config("spark.eventLog.enabled", true)
-            .master(master)
+            .config("spark.default.parallelism", 28) //one task for each executor
+            //.master(master)
             .getOrCreate();        
         
         JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());        
@@ -86,7 +88,7 @@ public class FullMetaBlockingWorkflow {
         //Block Filtering
         System.out.println("\n\nStarting BlockFiltering, reading from "+inputPath);
         
-        BlockFiltering bf = new BlockFiltering(spark);
+        BlockFiltering bf = new BlockFiltering();
         JavaPairRDD<Integer,Integer[]> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
         entityIndex.cache();
         //entityIndex.persist(StorageLevel.DISK_ONLY_2()); //store to disk with replication factor 2
@@ -100,22 +102,18 @@ public class FullMetaBlockingWorkflow {
         LongAccumulator CLEAN_BLOCK_ACCUM = jsc.sc().longAccumulator();
         LongAccumulator NUM_COMPARISONS_ACCUM = jsc.sc().longAccumulator();
         
-        BlocksFromEntityIndex bFromEI = new BlocksFromEntityIndex(spark, entityIndex);
-        JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI = bFromEI.run(CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
+        BlocksFromEntityIndex bFromEI = new BlocksFromEntityIndex();
+        JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
+        blocksFromEI.persist(StorageLevel.DISK_ONLY());
         
-        //Blocks Per Entity (not needed for WJS weighting scheme)
-        //BlocksPerEntity bpe = new BlocksPerEntity(spark, entityIndex);
-        //JavaPairRDD<Integer,Integer> blocksPerEntity = bpe.run();
-        //blocksPerEntity.cache();
-        //JavaPairRDD<Integer,Integer> blocksPerEntity = entityIndex.mapValues(x-> x.length).cache(); //one-liner to avoid a new class instance
         
         //get the total weights of each entity, required by WJS weigthing scheme (only)
         //Broadcast<JavaPairRDD<Integer, Iterable<Integer>>> blocksFromEI_BV = jsc.broadcast(blocksFromEI);
         System.out.println("\n\nStarting EntityWeightsWJS...");
-        EntityWeightsWJS wjsWeights = new EntityWeightsWJS(spark);
-        Map<Integer,Double> totalWeights = wjsWeights.getWeights(blocksFromEI, entityIndex); //double[] cannot be used, because some entityIds are negative
-        System.out.println("Total weights contain weights for "+totalWeights.size()+" entities.");
-        Broadcast<Map<Integer,Double>> totalWeights_BV = jsc.broadcast(totalWeights);
+        EntityWeightsWJS wjsWeights = new EntityWeightsWJS();
+        Broadcast<JavaPairRDD<Integer,Double>> totalWeights_BV = jsc.broadcast(wjsWeights.getWeights(blocksFromEI, entityIndex)); //double[] cannot be used, because some entityIds are negative
+        //System.out.println("Total weights contain weights for "+totalWeights.size()+" entities.");
+        //Broadcast<Map<Integer,Double>> totalWeights_BV = jsc.broadcast(totalWeights);
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
         final int K = ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
@@ -129,12 +127,12 @@ public class FullMetaBlockingWorkflow {
         
         //CNP
         System.out.println("\n\nStarting CNP...");
-        EntityBasedCNP cnp = new EntityBasedCNP(spark);
+        EntityBasedCNP cnp = new EntityBasedCNP();
         JavaPairRDD<Integer,Integer[]> metablockingResults = cnp.run(blocksFromEI, totalWeights_BV, K);
         
         metablockingResults
                 .mapValues(x -> Arrays.toString(x)).saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)
-//                .collect(); // only to get the execution time (just an action to trigger the execution)
+        System.out.println("Job finished successfully. Output written in "+outputPath);
     }
     
 }

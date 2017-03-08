@@ -41,21 +41,18 @@ public class BlockFiltering {
     
     static final Logger logger = Logger.getLogger(BlockFiltering.class.getName());
     
-    SparkSession spark;
-    String blockSizesOutputPath, entityIndexOutputPath;
+    public JavaPairRDD<Integer, Integer[]> run(JavaRDD<String> blockingInput, LongAccumulator BLOCK_ASSIGNMENTS) {        
+        JavaPairRDD<Integer,Integer[]> parsedBlocks = parseBlockCollection(blockingInput);
+        parsedBlocks.persist(StorageLevel.MEMORY_AND_DISK_SER());
+        
+        //add an integer rank to each blockId, starting with 0 (blocks are sorted in descending utility)
+        Map<Integer,Long> blocksRanking = getBlockSizes(parsedBlocks).values().zipWithIndex().collectAsMap();         
 
-    public BlockFiltering(SparkSession spark, String blockSizesOutputPath, String entityIndexOutputPath) {
-        this.spark = spark;
-        this.blockSizesOutputPath = blockSizesOutputPath;
-        this.entityIndexOutputPath = entityIndexOutputPath;
+        JavaPairRDD<Integer, Integer[]> entityIndex = getEntityIndex(parsedBlocks, blocksRanking, BLOCK_ASSIGNMENTS);
+        parsedBlocks.unpersist();
+        return  entityIndex;
     }
     
-    public BlockFiltering(SparkSession spark) {
-        this.spark = spark;
-        this.blockSizesOutputPath = null;
-        this.entityIndexOutputPath = null;
-    }
-
     //resulting key:blockID, value:entityIds array                            
     private JavaPairRDD<Integer,Integer[]> parseBlockCollection(JavaRDD<String> blockingInput) {
         System.out.println("Parsing the blocking collection...");
@@ -83,7 +80,6 @@ public class BlockFiltering {
     //outpu: a JavaPairRDD of key:inverseUtility (=max of D1 entities, D2 entities in this block), value:blockId (=input key)
     public JavaPairRDD<Integer,Integer> getBlockSizes(JavaPairRDD<Integer,Integer[]> parsedBlocks) {
         System.out.println("Getting the block sizes...");
-        //LongAccumulator numComparisons = JavaSparkContext.fromSparkContext(spark.sparkContext()).sc().longAccumulator();
         return parsedBlocks         
             .mapToPair(pair -> {
                 int blockId = pair._1();
@@ -98,7 +94,6 @@ public class BlockFiltering {
                 }
                 int D2counter = numEntities-D1counter;
                 long blockComparisons = D1counter * D2counter;
-                //numComparisons.add(blockComparisons);
                 
                 int inverseUtility = Math.max(D1counter, D2counter);
                 if (blockComparisons == 0) {
@@ -111,7 +106,7 @@ public class BlockFiltering {
             .sortByKey(false, 1); //save in descending utility order //TODO: check numPartitions      
     }
         
-    private JavaPairRDD<Integer, Integer[]> getEntityIndex(JavaPairRDD<Integer,Integer[]> parsedBlocks, JavaPairRDD<Integer,Integer> blockSizes, LongAccumulator BLOCK_ASSIGNMENTS) {
+    private JavaPairRDD<Integer, Integer[]> getEntityIndex(JavaPairRDD<Integer,Integer[]> parsedBlocks,  Map<Integer,Long> blocksRanking, LongAccumulator BLOCK_ASSIGNMENTS) {
         System.out.println("Creating the entity index...");
         //get pairs of the form (entityId, blockId)
         JavaPairRDD<Integer, Integer> entityIndexMapperResult = parsedBlocks
@@ -125,15 +120,10 @@ public class BlockFiltering {
                 }
                 return mapResults.iterator();
             }); //end of EntityIndexMapper logic 
-
-        //add an integer rank to each blockId, starting with 0 (blocks are sorted in descending utility)
-        Map<Integer,Long> blocksRanking = blockSizes.values().zipWithIndex().collectAsMap(); 
-//        JavaPairRDD<Integer,Long> blocksRankingRDD = blockSizes.values().zipWithIndex(); 
         
         //create the entity index (similar to EntityIndexReducer)
         return entityIndexMapperResult
                 .mapValues(x -> blocksRanking.get(x)) //replace all block Ids with their rank in the sorted list of blocks (by descending utility)
-//                .mapValues(x -> blocksRankingRDD.lookup(x).get(0)) //alternative
                 .groupByKey()                
                 .mapValues(iter -> Ordering.natural().sortedCopy(iter)) //order the blocks of each entity by their rank (highest utility first)
                 .mapToPair(pair -> {
@@ -149,25 +139,12 @@ public class BlockFiltering {
                     BLOCK_ASSIGNMENTS.add(entityIndex.length);
                     return new Tuple2<Integer,Integer[]>(pair._1(), entityIndex); //the entity index for the current entity
                 });                
-                //.saveAsObjectFile(entityIndexOutputPath);
-//                .saveAsTextFile(entityIndexOutputPath);
-                //.saveAsNewAPIHadoopFile(entityIndexOutputPath, VIntWritable.class, VIntArrayWritable.class, SequenceFileOutputFormat.class);                
-    }
-    
-        
-    public JavaPairRDD<Integer, Integer[]> run(JavaRDD<String> blockingInput, LongAccumulator BLOCK_ASSIGNMENTS) {        
-        JavaPairRDD<Integer,Integer[]> parsedBlocks = parseBlockCollection(blockingInput);
-        parsedBlocks.persist(StorageLevel.MEMORY_AND_DISK_SER());
-        
-        JavaPairRDD<Integer,Integer> blockSizes = getBlockSizes(parsedBlocks);
-        blockSizes.cache();        
-//        blockSizes
-//                .map(x -> x._1()+","+ x._2())         //to remove the parentheses
-//                .saveAsTextFile(blockSizesOutputPath);     
-        return getEntityIndex(parsedBlocks, blockSizes, BLOCK_ASSIGNMENTS);
+
     }
     
     
+    
+    //tests (ignore)
     public static void main(String[] args) {
         String tmpPath;
         String master;
@@ -212,7 +189,7 @@ public class BlockFiltering {
         JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());
         LongAccumulator BLOCK_ASSIGNMENTS = jsc.sc().longAccumulator();
         
-        BlockFiltering bf = new BlockFiltering(spark, blockSizesOutputPath, entityIndexOutputPath);
+        BlockFiltering bf = new BlockFiltering();
         JavaPairRDD<Integer, Integer[]> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS); //input: a blocking collection
         entityIndex.saveAsObjectFile(entityIndexOutputPath);
     }

@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import metablockingspark.utils.Utils;
 import org.apache.spark.api.java.JavaPairRDD;
+import org.apache.spark.api.java.Optional;
 import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.SparkSession;
 import scala.Tuple2;
@@ -32,15 +33,7 @@ import scala.Tuple2;
  */
 public class EntityBasedCNP {
 
-    SparkSession spark;     
-
-    public EntityBasedCNP(SparkSession spark) {
-        this.spark = spark;        
-    }
-    
-    public JavaPairRDD<Integer,Integer[]> run(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, Broadcast<Map<Integer,Double>> totalWeightsBV, int K) {
-        
-        Map<Integer,Double> totalWeights = totalWeightsBV.value();
+    public JavaPairRDD<Integer,Integer[]> run(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, Broadcast<JavaPairRDD<Integer,Double>> totalWeightsBV, int K) {
         
         //map phase
         JavaPairRDD<Integer, Integer[]> mapOutput = blocksFromEI.flatMapToPair(x -> {            
@@ -76,6 +69,15 @@ public class EntityBasedCNP {
             return mapResults.iterator();
         })
         .filter(x-> x != null);
+        
+        //(left outer) join mapOutput with totalWeights:
+        //turn each mapOutput tuple (entityId, listOfEntitiesToCompare) into (entityId, <listOfEntitiesToCompare, totalWeight(entityId)> )
+        JavaPairRDD<Integer, Tuple2<Integer[],Optional<Double>> > joined = mapOutput.leftOuterJoin(totalWeightsBV.value());
+        Map<Integer,Double> totalWeights = joined
+                .mapToPair(x -> new Tuple2<>(x._1(),x._2()._2().get()))
+                .collectAsMap();
+        
+        
         
         //reduce phase
         //metaBlockingResults: key: an entityId, value: an array of topK candidate matches, in descending order of score (match likelihood)

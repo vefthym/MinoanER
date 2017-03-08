@@ -19,8 +19,6 @@ package metablockingspark.preprocessing;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.spark.api.java.JavaPairRDD;
-import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.sql.SparkSession;
 import org.apache.spark.util.LongAccumulator;
 import scala.Tuple2;
 
@@ -32,37 +30,23 @@ import scala.Tuple2;
  */
 public class BlocksFromEntityIndex {
     
-    SparkSession spark;
-    String blocksFromEIOutputPath;
-    JavaPairRDD<Integer,Integer[]> entityIndex;    
-
-    public BlocksFromEntityIndex(SparkSession spark, JavaPairRDD<Integer,Integer[]> entityIndex, String blocksFromEIOutputPath) {
-        this.spark = spark;        
-        this.entityIndex = entityIndex;
-        this.blocksFromEIOutputPath = blocksFromEIOutputPath;        
-    }
-    
-    public BlocksFromEntityIndex(SparkSession spark, String entityIndexInputPath, String blocksFromEIOutputPath) {
-        this(spark, 
-             JavaPairRDD.fromJavaRDD(JavaSparkContext.fromSparkContext(spark.sparkContext()).objectFile(entityIndexInputPath)), 
-             blocksFromEIOutputPath);
-    }
-    
-    public BlocksFromEntityIndex(SparkSession spark, JavaPairRDD<Integer,Integer[]> entityIndex) {
-        this(spark, entityIndex, null);
-    }
-    
-    public JavaPairRDD<Integer, Iterable<Integer>> run(LongAccumulator cleanBlocksAccum, LongAccumulator numComparisons) {
-        return entityIndex.flatMapToPair(x -> 
-            {
+    public JavaPairRDD<Integer, Iterable<Integer>> run(JavaPairRDD<Integer,Integer[]> entityIndex, LongAccumulator cleanBlocksAccum, LongAccumulator numComparisons) {
+        System.out.println("Getting the blocks from the entity index...");
+        JavaPairRDD<Integer,Integer> flat = entityIndex.flatMapToPair(x -> 
+            {                   
                 List<Tuple2<Integer,Integer>> mapResults = new ArrayList<>();
-                for (int blockId : x._2()) {
-                    mapResults.add(new Tuple2<>(blockId, x._1()));
+                Integer entityId = x._1();
+                for (Integer blockId : x._2()) {
+                    mapResults.add(new Tuple2<>(blockId, entityId));
                 }
                 return mapResults.iterator();
-            })
-            .groupByKey()            
-            .filter(x -> { //keep only blocks with > 2 entities and with entities from both datasets (i.e., at least 1 positive and 1 negative entityId)
+            });
+        
+        System.out.println("Flattening of entity Index finished. Starting group by block..."); //debugging message
+        JavaPairRDD<Integer, Iterable<Integer>> blockGroups = flat.groupByKey();//group by block id       
+        
+        System.out.println("Group by block finished. Starting filtering singleton blocks and blocks with entities from one collection"); //debugging message
+        return blockGroups.filter(x -> { //keep only blocks with > 2 entities and with entities from both datasets (i.e., at least 1 positive and 1 negative entityId)
                 Iterable<Integer> entities = (Iterable<Integer>) x._2();
                 long negatives = 0;
                 boolean containsPositive = false;
