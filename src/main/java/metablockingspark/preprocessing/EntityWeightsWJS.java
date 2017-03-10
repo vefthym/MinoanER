@@ -29,6 +29,21 @@ import scala.Tuple2;
  */
 public class EntityWeightsWJS implements Serializable {
     
+    private long numPositiveEntities, numNegativeEntities;
+
+    public EntityWeightsWJS() {
+        numNegativeEntities = 0;
+        numPositiveEntities = 0;        
+    }
+            
+    public long getNumPositiveEntities() {
+        return numPositiveEntities;
+    }
+    
+    public long getNumNegativeEntities() {
+        return numNegativeEntities;
+    }
+    
     public JavaPairRDD<Integer, Double> getWeights(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, JavaPairRDD<Integer,Integer[]> entityIndex) {
         JavaRDD<Integer> entityIds = entityIndex.keys().cache();
         
@@ -52,8 +67,8 @@ public class EntityWeightsWJS implements Serializable {
         //JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI = blocksFromEI_BV.value();
         
         System.out.println("Counting positive and negative entities...");
-        long numNegativeEntities = entityIds.filter(x -> x < 0).count();
-        long numPositiveEntities = entityIds.count() - numNegativeEntities;
+        numNegativeEntities = entityIds.filter(x -> x < 0).count();
+        numPositiveEntities = entityIds.count() - numNegativeEntities;
                        
         System.out.println("Computing weights and storing them in the resulting RDD...");
         return entityIndex.mapToPair(entityInfo -> {

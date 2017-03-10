@@ -19,17 +19,14 @@ package metablockingspark.workflow;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.Arrays;
-import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import metablockingspark.entityBased.EntityBasedCNP;
+import metablockingspark.entityBased.EntityBasedCNPCBS;
 import metablockingspark.preprocessing.BlockFiltering;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
-import metablockingspark.preprocessing.EntityWeightsWJS;
 import metablockingspark.utils.Utils;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.storage.StorageLevel;
 import org.apache.spark.util.LongAccumulator;
@@ -38,7 +35,7 @@ import org.apache.spark.util.LongAccumulator;
  *
  * @author vefthym
  */
-public class FullMetaBlockingWorkflow {
+public class FullMetaBlockingWorkflowCBS {
     
     
     
@@ -72,7 +69,7 @@ public class FullMetaBlockingWorkflow {
             .appName("MetaBlocking on "+inputPath.substring(inputPath.lastIndexOf("/")+1))
             .config("spark.sql.warehouse.dir", tmpPath)
             .config("spark.eventLog.enabled", true)
-            .config("spark.default.parallelism", 84) //one task for each core
+            .config("spark.default.parallelism", 28) //one task for each executor            
             //.master(master)
             .getOrCreate();        
         
@@ -106,14 +103,7 @@ public class FullMetaBlockingWorkflow {
         JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
         blocksFromEI.persist(StorageLevel.DISK_ONLY());
         
-        
-        //get the total weights of each entity, required by WJS weigthing scheme (only)
-        //Broadcast<JavaPairRDD<Integer, Iterable<Integer>>> blocksFromEI_BV = jsc.broadcast(blocksFromEI);
-        System.out.println("\n\nStarting EntityWeightsWJS...");
-        EntityWeightsWJS wjsWeights = new EntityWeightsWJS();
-        Broadcast<JavaPairRDD<Integer,Double>> totalWeights_BV = jsc.broadcast(wjsWeights.getWeights(blocksFromEI, entityIndex)); //double[] cannot be used, because some entityIds are negative
-        //System.out.println("Total weights contain weights for "+totalWeights.size()+" entities.");
-        //Broadcast<Map<Integer,Double>> totalWeights_BV = jsc.broadcast(totalWeights);
+        blocksFromEI.count(); //the simplest action just to run blocksFromEI and get the actual value for the counters below
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
         final int K = ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
@@ -125,16 +115,10 @@ public class FullMetaBlockingWorkflow {
         
         entityIndex.unpersist();
         
-        long numNegativeEntities = wjsWeights.getNumNegativeEntities();
-        long numPositiveEntities = wjsWeights.getNumPositiveEntities();
-        
-        System.out.println("Found "+numNegativeEntities+" negative entities");
-        System.out.println("Found "+numPositiveEntities+" positive entities");
-        
         //CNP
         System.out.println("\n\nStarting CNP...");
-        EntityBasedCNP cnp = new EntityBasedCNP();
-        JavaPairRDD<Integer,Integer[]> metablockingResults = cnp.run(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
+        EntityBasedCNPCBS cnp = new EntityBasedCNPCBS();
+        JavaPairRDD<Integer,Integer[]> metablockingResults = cnp.run(blocksFromEI, K);
         
         metablockingResults
                 .mapValues(x -> Arrays.toString(x)).saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)

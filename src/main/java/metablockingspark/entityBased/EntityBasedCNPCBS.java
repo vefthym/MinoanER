@@ -22,19 +22,19 @@ import java.util.List;
 import java.util.Map;
 import metablockingspark.utils.Utils;
 import org.apache.spark.api.java.JavaPairRDD;
-import org.apache.spark.broadcast.Broadcast;
-import scala.Serializable;
+import org.apache.spark.storage.StorageLevel;
 import scala.Tuple2;
 
 /**
- *
+ * Entity based approach for CNP pruning (local top-k) using the CBS (common blocks) weighting scheme. 
  * @author vefthym
  */
-public class EntityBasedCNP implements Serializable {
-    
-    public JavaPairRDD<Integer,Integer[]> run(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, Broadcast<JavaPairRDD<Integer,Double>> totalWeightsBV, int K, long numNegativeEntities, long numPositiveEntities) {
+public class EntityBasedCNPCBS {
+
+    public JavaPairRDD<Integer,Integer[]> run(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, int K) {
         
         //map phase
+        //resulting RDD is of the form <entityId, [candidateMatchIds]>
         JavaPairRDD<Integer, Integer[]> mapOutput = blocksFromEI.flatMapToPair(x -> {            
             List<Integer> positives = new ArrayList<>();
             List<Integer> negatives = new ArrayList<>();
@@ -69,11 +69,7 @@ public class EntityBasedCNP implements Serializable {
         })
         .filter(x-> x != null);
         
-        JavaPairRDD<Integer,Double> totalWeightsRDD = totalWeightsBV.value();
-        System.out.println(totalWeightsRDD.count()+ " total weights found");
-        Map<Integer,Double> totalWeights = totalWeightsRDD.collectAsMap();
-        System.out.println("Weights successfully collected as map");
-            
+        mapOutput.persist(StorageLevel.MEMORY_AND_DISK_SER());
         
         //reduce phase
         //metaBlockingResults: key: an entityId, value: an array of topK candidate matches, in descending order of score (match likelihood)
@@ -81,38 +77,25 @@ public class EntityBasedCNP implements Serializable {
                 .mapToPair(x -> {
                     Integer entityId = x._1();
                     
-                    //compute the numerators
+                    //find number of common blocks
                     Map<Integer,Double> counters = new HashMap<>(); //number of common blocks with current entity per candidate match
-                    for(Integer[] candidates : x._2()) {                       
-                        int numNegativeEntitiesInBlock = getNumNegativeEntitiesInBlock(candidates);
-                        int numPositiveEntitiesInBlock = candidates.length - numNegativeEntitiesInBlock;
-                        double weight1 = Math.log10((double)numNegativeEntities/numNegativeEntitiesInBlock);
-                        double weight2 = Math.log10((double)numPositiveEntities/numPositiveEntitiesInBlock);
-                        
-                        for (int neighborId : candidates) {
-                            Double currWeight = counters.get(neighborId);
-                            if (currWeight == null) {
-                                currWeight = 0.0;
+                    for(Integer[] next : x._2()) {
+                        for (int neighborId : next) {
+                            Double count = counters.get(neighborId);
+                            if (count == null) {
+                                count = 0.0;
                             }				
-                            counters.put(neighborId, currWeight+weight1+weight2);
+                            counters.put(neighborId, count+1);
                         }
                     }
                     
-                    //calculate the weights of each candidate match (edge in the blocking graph)
-                    Map<Integer, Double> weights = new HashMap<>();
-                    double entityWeight = totalWeights.get(entityId);
-                    for (int neighborId : counters.keySet()) {
-			double currentWeight = counters.get(neighborId) / (Double.MIN_NORMAL + entityWeight + totalWeights.get(neighborId));
-			weights.put(neighborId, currentWeight);			
-                    }
-                    
                     //keep the top-K weights
-                    weights = Utils.sortByValue(weights);                    
-                    Integer[] candidateMatchesSorted = new Integer[Math.min(weights.size(), K)];                    
+                    counters = Utils.sortByValue(counters);                    
+                    Integer[] candidateMatchesSorted = new Integer[Math.min(counters.size(), K)];                    
                     
                     int i = 0;
-                    for (Integer neighbor : weights.keySet()) {
-                        if (i == weights.size() || i == K) {
+                    for (Integer neighbor : counters.keySet()) {
+                        if (i == counters.size() || i == K) {
                             break;
                         }
                         candidateMatchesSorted[i++] = neighbor;                        
@@ -121,16 +104,6 @@ public class EntityBasedCNP implements Serializable {
                     return new Tuple2<Integer,Integer[]>(entityId, candidateMatchesSorted);
                 });
                 
-    }
-
-    private int getNumNegativeEntitiesInBlock(Integer[] candidates) {
-        int count = 0;
-        for (Integer candidate : candidates) {
-            if (candidate < 0) {
-                count++;
-            }
-        }
-        return count;
     }
     
 }
