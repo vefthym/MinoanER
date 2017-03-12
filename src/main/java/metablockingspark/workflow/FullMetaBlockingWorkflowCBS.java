@@ -21,9 +21,11 @@ import java.net.URISyntaxException;
 import java.util.Arrays;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import metablockingspark.entityBased.EntityBasedCNPCBS;
+import metablockingspark.entityBased.EntityBasedCNPCBSCompressed;
+import metablockingspark.entityBased.EntityBasedCNPCBSUncompressed;
 import metablockingspark.preprocessing.BlockFiltering;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
+import metablockingspark.utils.MyKryoRegistrator;
 import metablockingspark.utils.Utils;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaSparkContext;
@@ -69,9 +71,18 @@ public class FullMetaBlockingWorkflowCBS {
             .appName("MetaBlocking on "+inputPath.substring(inputPath.lastIndexOf("/")+1))
             .config("spark.sql.warehouse.dir", tmpPath)
             .config("spark.eventLog.enabled", true)
-            .config("spark.default.parallelism", 28) //one task for each executor            
+            .config("spark.default.parallelism", 420) //one task for each core    
+            .config("spark.rdd.compress", true)
+            
+            //un-comment the following for Kryo serializer (seems not good in Java...)
+            .config("spark.kryo.registrator", MyKryoRegistrator.class.getName())
+            .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+            .config("spark.kryo.registrationRequired", true) //just to be safe that everything is serialized as it should be (otherwise runtime error)
+            
             //.master(master)
             .getOrCreate();        
+        
+        
         
         JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());        
         LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();
@@ -117,7 +128,8 @@ public class FullMetaBlockingWorkflowCBS {
         
         //CNP
         System.out.println("\n\nStarting CNP...");
-        EntityBasedCNPCBS cnp = new EntityBasedCNPCBS();
+//        EntityBasedCNPCBSCompressed cnp = new EntityBasedCNPCBSCompressed();
+        EntityBasedCNPCBSUncompressed cnp = new EntityBasedCNPCBSUncompressed();
         JavaPairRDD<Integer,Integer[]> metablockingResults = cnp.run(blocksFromEI, K);
         
         metablockingResults

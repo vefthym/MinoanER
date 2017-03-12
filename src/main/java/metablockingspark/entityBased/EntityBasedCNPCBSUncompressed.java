@@ -22,14 +22,13 @@ import java.util.List;
 import java.util.Map;
 import metablockingspark.utils.Utils;
 import org.apache.spark.api.java.JavaPairRDD;
-import org.apache.spark.storage.StorageLevel;
 import scala.Tuple2;
 
 /**
  * Entity based approach for CNP pruning (local top-k) using the CBS (common blocks) weighting scheme. 
  * @author vefthym
  */
-public class EntityBasedCNPCBS {
+public class EntityBasedCNPCBSUncompressed {
 
     public JavaPairRDD<Integer,Integer[]> run(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, int K) {
         
@@ -49,27 +48,22 @@ public class EntityBasedCNPCBS {
             if (positives.isEmpty() || negatives.isEmpty()) {
                 return null;
             }
+                        
+            Integer[] positivesArray = positives.toArray(new Integer[positives.size()]);             
+            Integer[] negativesArray = negatives.toArray(new Integer[negatives.size()]);                         
             
-            Integer[] positivesArray = positives.toArray(new Integer[positives.size()]);
-            Integer[] negativesArray = negatives.toArray(new Integer[negatives.size()]);
-            
-            List<Tuple2<Integer,Integer[]>> mapResults = new ArrayList<>();
-            
-            //emit all the negative entities array for each positive entity
-            for (int i = 0; i < positivesArray.length; ++i) {                
-                mapResults.add(new Tuple2<>(positivesArray[i], negativesArray));                
-            }
-
-            //emit all the positive entities array for each negative entity
-            for (int i = 0; i < negativesArray.length; ++i) {
-                mapResults.add(new Tuple2<>(negativesArray[i], positivesArray));                
-            }
-            
-            return mapResults.iterator();
-        })
+            List<Tuple2<Integer,Integer[]>> mapResults = new ArrayList<>();                         
+            //emit all the negative entities array for each positive entity             
+            for (int i = 0; i < positivesArray.length; ++i) {                                
+                mapResults.add(new Tuple2<>(positivesArray[i], negativesArray));
+            }                            
+            //emit all the positive entities array for each negative entity             
+            for (int i = 0; i < negativesArray.length; ++i) {                 
+                mapResults.add(new Tuple2<>(negativesArray[i], positivesArray));                            
+            }                         
+            return mapResults.iterator();         
+        })         
         .filter(x-> x != null);
-        
-        mapOutput.persist(StorageLevel.MEMORY_AND_DISK_SER());
         
         //reduce phase
         //metaBlockingResults: key: an entityId, value: an array of topK candidate matches, in descending order of score (match likelihood)
@@ -79,14 +73,14 @@ public class EntityBasedCNPCBS {
                     
                     //find number of common blocks
                     Map<Integer,Double> counters = new HashMap<>(); //number of common blocks with current entity per candidate match
-                    for(Integer[] next : x._2()) {
-                        for (int neighborId : next) {
-                            Double count = counters.get(neighborId);
-                            if (count == null) {
-                                count = 0.0;
-                            }				
-                            counters.put(neighborId, count+1);
-                        }
+                    for(Integer[] next : x._2()) {                         
+                        for (int neighborId : next) {                             
+                            Double count = counters.get(neighborId);                             
+                            if (count == null) {                                 
+                                count = 0.0;                             
+                            }				                            
+                            counters.put(neighborId, count+1);                         
+                        }                     
                     }
                     
                     //keep the top-K weights

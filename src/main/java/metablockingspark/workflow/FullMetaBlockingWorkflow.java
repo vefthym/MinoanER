@@ -72,7 +72,7 @@ public class FullMetaBlockingWorkflow {
             .appName("MetaBlocking on "+inputPath.substring(inputPath.lastIndexOf("/")+1))
             .config("spark.sql.warehouse.dir", tmpPath)
             .config("spark.eventLog.enabled", true)
-            .config("spark.default.parallelism", 84) //one task for each core
+            .config("spark.default.parallelism", 420) 
             //.master(master)
             .getOrCreate();        
         
