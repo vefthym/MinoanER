@@ -73,8 +73,8 @@ public class EntityBasedCNPCBSUncompressed {
                     
                     //find number of common blocks
                     Map<Integer,Double> counters = new HashMap<>(); //number of common blocks with current entity per candidate match
-                    for(Integer[] next : x._2()) {                         
-                        for (int neighborId : next) {                             
+                    for(Integer[] neighbors : x._2()) {      //neighbors in the blocking graph           
+                        for (int neighborId : neighbors) {                             
                             Double count = counters.get(neighborId);                             
                             if (count == null) {                                 
                                 count = 0.0;                             

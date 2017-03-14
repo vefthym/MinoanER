@@ -24,6 +24,7 @@ import java.util.logging.Logger;
 import metablockingspark.entityBased.EntityBasedCNPCBSCompressed;
 import metablockingspark.entityBased.EntityBasedCNPCBSUncompressed;
 import metablockingspark.preprocessing.BlockFiltering;
+import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
 import metablockingspark.utils.MyKryoRegistrator;
 import metablockingspark.utils.Utils;
@@ -55,16 +56,16 @@ public class FullMetaBlockingWorkflowCBS {
             inputPath = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testInput";            
             outputPath = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testOutput";            
         } else {            
-            tmpPath = "/file:/tmp";
+            tmpPath = "/file:/tmp/";
             //master = "spark://master:7077";
             inputPath = args[0];            
             outputPath = args[1];
             // delete existing output directories
-            try {                                
+            /*try {                                
                 Utils.deleteHDFSPath(outputPath);
             } catch (IOException | URISyntaxException ex) {
                 Logger.getLogger(BlockFiltering.class.getName()).log(Level.SEVERE, null, ex);
-            }
+            }*/
         }
                        
         SparkSession spark = SparkSession.builder()
@@ -74,10 +75,11 @@ public class FullMetaBlockingWorkflowCBS {
             .config("spark.default.parallelism", 420) //one task for each core    
             .config("spark.rdd.compress", true)
             
-            //un-comment the following for Kryo serializer (seems not good in Java...)
+            //un-comment the following for Kryo serializer (does not seem to improve compression, only speed)            
             .config("spark.kryo.registrator", MyKryoRegistrator.class.getName())
             .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
             .config("spark.kryo.registrationRequired", true) //just to be safe that everything is serialized as it should be (otherwise runtime error)
+            
             
             //.master(master)
             .getOrCreate();        
@@ -96,7 +98,7 @@ public class FullMetaBlockingWorkflowCBS {
         //Block Filtering
         System.out.println("\n\nStarting BlockFiltering, reading from "+inputPath);
         
-        BlockFiltering bf = new BlockFiltering();
+        BlockFilteringAdvanced bf = new BlockFilteringAdvanced();
         JavaPairRDD<Integer,Integer[]> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
         entityIndex.cache();
         //entityIndex.persist(StorageLevel.DISK_ONLY_2()); //store to disk with replication factor 2
@@ -128,8 +130,8 @@ public class FullMetaBlockingWorkflowCBS {
         
         //CNP
         System.out.println("\n\nStarting CNP...");
-//        EntityBasedCNPCBSCompressed cnp = new EntityBasedCNPCBSCompressed();
-        EntityBasedCNPCBSUncompressed cnp = new EntityBasedCNPCBSUncompressed();
+        EntityBasedCNPCBSCompressed cnp = new EntityBasedCNPCBSCompressed();
+//        EntityBasedCNPCBSUncompressed cnp = new EntityBasedCNPCBSUncompressed();
         JavaPairRDD<Integer,Integer[]> metablockingResults = cnp.run(blocksFromEI, K);
         
         metablockingResults

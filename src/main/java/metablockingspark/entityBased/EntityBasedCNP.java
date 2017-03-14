@@ -80,6 +80,7 @@ public class EntityBasedCNP implements Serializable {
         JavaPairRDD<Integer,Iterable<Integer[]>> entitiesBlocks = mapOutput.groupByKey(336); //(entityId, Iterable<[neighborIds]>)     //shuffle 1 (or 5)
         
         
+        
         JavaPairRDD<Integer,Integer[]> neighborsRDD; //an array of unique neighbor ids per entityId
         /*neighborsRDD = mapOutput.aggregateByKey(     //shuffle 1
                 new HashSet<Integer>(), 

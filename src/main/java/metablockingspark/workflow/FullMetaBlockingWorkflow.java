@@ -24,6 +24,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import metablockingspark.entityBased.EntityBasedCNP;
 import metablockingspark.preprocessing.BlockFiltering;
+import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
 import metablockingspark.preprocessing.EntityWeightsWJS;
 import metablockingspark.utils.Utils;
@@ -88,7 +89,7 @@ public class FullMetaBlockingWorkflow {
         //Block Filtering
         System.out.println("\n\nStarting BlockFiltering, reading from "+inputPath);
         
-        BlockFiltering bf = new BlockFiltering();
+        BlockFilteringAdvanced bf = new BlockFilteringAdvanced();
         JavaPairRDD<Integer,Integer[]> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
         entityIndex.cache();
         //entityIndex.persist(StorageLevel.DISK_ONLY_2()); //store to disk with replication factor 2
