@@ -61,19 +61,29 @@ public class FullMetaBlockingWorkflowCBS {
             inputPath = args[0];            
             outputPath = args[1];
             // delete existing output directories
-            /*try {                                
+            try {                                
                 Utils.deleteHDFSPath(outputPath);
             } catch (IOException | URISyntaxException ex) {
                 Logger.getLogger(BlockFiltering.class.getName()).log(Level.SEVERE, null, ex);
-            }*/
+            }
         }
+        
+        final int NUM_CORES_IN_CLUSTER = 128;
                        
         SparkSession spark = SparkSession.builder()
-            .appName("MetaBlocking on "+inputPath.substring(inputPath.lastIndexOf("/")+1))
+            .appName("MetaBlocking on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1)) 
             .config("spark.sql.warehouse.dir", tmpPath)
             .config("spark.eventLog.enabled", true)
-            .config("spark.default.parallelism", 420) //one task for each core    
+            .config("spark.default.parallelism", NUM_CORES_IN_CLUSTER * 4) //x tasks for each core (128 cores) --> x "reduce" rounds
             .config("spark.rdd.compress", true)
+            
+            //memory configurations (deprecated)
+            .config("spark.memory.useLegacyMode", true)
+            .config("spark.shuffle.memoryFraction", 0.4)
+            .config("spark.storage.memoryFraction", 0.4)
+            .config("spark.memory.offHeap.enabled", true)
+            .config("spark.memory.offHeap.size", "10g")
+            
             
             //un-comment the following for Kryo serializer (does not seem to improve compression, only speed)            
             .config("spark.kryo.registrator", MyKryoRegistrator.class.getName())
@@ -130,8 +140,8 @@ public class FullMetaBlockingWorkflowCBS {
         
         //CNP
         System.out.println("\n\nStarting CNP...");
-        EntityBasedCNPCBSCompressed cnp = new EntityBasedCNPCBSCompressed();
-//        EntityBasedCNPCBSUncompressed cnp = new EntityBasedCNPCBSUncompressed();
+        //EntityBasedCNPCBSCompressed cnp = new EntityBasedCNPCBSCompressed(); //biggger shuffle size than usign Java Serializer without Hadoop Writables
+        EntityBasedCNPCBSUncompressed cnp = new EntityBasedCNPCBSUncompressed();
         JavaPairRDD<Integer,Integer[]> metablockingResults = cnp.run(blocksFromEI, K);
         
         metablockingResults

@@ -112,7 +112,7 @@ public class FullMetaBlockingWorkflow {
         //Broadcast<JavaPairRDD<Integer, Iterable<Integer>>> blocksFromEI_BV = jsc.broadcast(blocksFromEI);
         System.out.println("\n\nStarting EntityWeightsWJS...");
         EntityWeightsWJS wjsWeights = new EntityWeightsWJS();
-        Broadcast<JavaPairRDD<Integer,Double>> totalWeights_BV = jsc.broadcast(wjsWeights.getWeights(blocksFromEI, entityIndex)); //double[] cannot be used, because some entityIds are negative
+        Broadcast<JavaPairRDD<Integer,Float>> totalWeights_BV = jsc.broadcast(wjsWeights.getWeights(blocksFromEI, entityIndex)); //double[] cannot be used, because some entityIds are negative
         //System.out.println("Total weights contain weights for "+totalWeights.size()+" entities.");
         //Broadcast<Map<Integer,Double>> totalWeights_BV = jsc.broadcast(totalWeights);
         

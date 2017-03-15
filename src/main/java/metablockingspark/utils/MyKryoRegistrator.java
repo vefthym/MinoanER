@@ -36,6 +36,7 @@ public class MyKryoRegistrator implements KryoRegistrator {
         kryo.register(Object.class);
         kryo.register(Object[].class);
         kryo.register(VIntWritable.class);
+        kryo.register(VIntWritable[].class);
         kryo.register(VIntArrayWritable.class);
         try {
             kryo.register(Class.forName("scala.reflect.ClassTag$$anon$1"));

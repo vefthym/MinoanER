@@ -35,7 +35,7 @@ public class Utils {
     
     public static void deleteHDFSPath(String stringPath) throws IOException, URISyntaxException {
         Configuration conf = new Configuration();        
-        FileSystem hdfs = FileSystem.get(new URI("hdfs://master:9000"), conf);
+        FileSystem hdfs = FileSystem.get(new URI(stringPath.substring(0,stringPath.indexOf("/",stringPath.indexOf(":9000")))), conf); //hdfs://clusternode1:9000 or hdfs://master:9000
         Path path = new Path(stringPath);
         if (hdfs.exists(path)) {
             hdfs.delete(path, true);

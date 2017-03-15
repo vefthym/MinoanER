@@ -36,7 +36,7 @@ import scala.Tuple2;
  */
 public class EntityBasedCNP implements Serializable {
     
-    public JavaPairRDD<Integer,Integer[]> run(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, Broadcast<JavaPairRDD<Integer,Double>> totalWeightsBV, int K, long numNegativeEntities, long numPositiveEntities) {
+    public JavaPairRDD<Integer,Integer[]> run(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, Broadcast<JavaPairRDD<Integer,Float>> totalWeightsBV, int K, long numNegativeEntities, long numPositiveEntities) {
         
         //map phase
         JavaPairRDD<Integer, Integer[]> mapOutput = blocksFromEI.flatMapToPair(x -> {            
@@ -73,7 +73,7 @@ public class EntityBasedCNP implements Serializable {
         })
         .filter(x-> x != null);
         
-        JavaPairRDD<Integer,Double> totalWeightsRDD = totalWeightsBV.value();
+        JavaPairRDD<Integer,Float> totalWeightsRDD = totalWeightsBV.value();
         //System.out.println(totalWeightsRDD.count()+ " total weights found");
         
         //mapOutput is in the form : <entityId, [neighborIds]>
@@ -118,33 +118,33 @@ public class EntityBasedCNP implements Serializable {
         .mapToPair(x -> {
             Integer entityId = x._1();
             //compute the numerators
-            Map<Integer,Double> counters = new HashMap<>(); //number of common blocks with current entity per candidate match
+            Map<Integer,Float> counters = new HashMap<>(); //number of common blocks with current entity per candidate match
             for(Integer[] candidates : x._2()._2()) { //for each block (as an array of entities)              
                 int numNegativeEntitiesInBlock = getNumNegativeEntitiesInBlock(candidates);
                 int numPositiveEntitiesInBlock = candidates.length - numNegativeEntitiesInBlock;
-                double weight1 = Math.log10((double)numNegativeEntities/numNegativeEntitiesInBlock);
-                double weight2 = Math.log10((double)numPositiveEntities/numPositiveEntitiesInBlock);
+                float weight1 = (float) Math.log10((double)numNegativeEntities/numNegativeEntitiesInBlock);
+                float weight2 = (float) Math.log10((double)numPositiveEntities/numPositiveEntitiesInBlock);
 
                 for (int neighborId : candidates) {
-                    Double currWeight = counters.get(neighborId);
+                    Float currWeight = counters.get(neighborId);
                     if (currWeight == null) {
-                        currWeight = 0.0;
+                        currWeight = 0f;
                     }				
                     counters.put(neighborId, currWeight+weight1+weight2);
                 }
             }
             
             //retrive the totalWeights only for the local entities
-            Map<Integer, Double> localEntityWeights = new HashMap<>();
-            for (Tuple2<Integer, Double> weight : x._2()._1()) {
+            Map<Integer, Float> localEntityWeights = new HashMap<>();
+            for (Tuple2<Integer, Float> weight : x._2()._1()) {
                 localEntityWeights.put(weight._1(), weight._2());
             }            
          
             //calculate the weights of each candidate match (edge in the blocking graph)
-            Map<Integer, Double> weights = new HashMap<>();
-            double entityWeight = localEntityWeights.get(entityId);
+            Map<Integer, Float> weights = new HashMap<>();
+            float entityWeight = localEntityWeights.get(entityId);
             for (int neighborId : counters.keySet()) {
-                double currentWeight = counters.get(neighborId) / (Double.MIN_NORMAL + entityWeight + localEntityWeights.get(neighborId));
+                float currentWeight = counters.get(neighborId) / (Float.MIN_NORMAL + entityWeight + localEntityWeights.get(neighborId));
                 weights.put(neighborId, currentWeight);			
             }
 
@@ -166,7 +166,7 @@ public class EntityBasedCNP implements Serializable {
         
         //the following is cheap to compute (one shuffle needed), but can easily give OOM error
         /*
-        Map<Integer,Double> totalWeights = totalWeightsRDD.collectAsMap(); //cause of OOM error
+        Map<Integer,Float> totalWeights = totalWeightsRDD.collectAsMap(); //cause of OOM error
         
         //reduce phase
         //metaBlockingResults: key: an entityId, value: an array of topK candidate matches, in descending order of score (match likelihood)
@@ -175,27 +175,27 @@ public class EntityBasedCNP implements Serializable {
                     Integer entityId = x._1();
                     
                     //compute the numerators
-                    Map<Integer,Double> counters = new HashMap<>(); //number of common blocks with current entity per candidate match
+                    Map<Integer,Float> counters = new HashMap<>(); //number of common blocks with current entity per candidate match
                     for(Integer[] candidates : x._2()) {                       
                         int numNegativeEntitiesInBlock = getNumNegativeEntitiesInBlock(candidates);
                         int numPositiveEntitiesInBlock = candidates.length - numNegativeEntitiesInBlock;
-                        double weight1 = Math.log10((double)numNegativeEntities/numNegativeEntitiesInBlock);
-                        double weight2 = Math.log10((double)numPositiveEntities/numPositiveEntitiesInBlock);
+                        float weight1 = (float) Math.log10((double)numNegativeEntities/numNegativeEntitiesInBlock);
+                        float weight2 = (float) Math.log10((double)numPositiveEntities/numPositiveEntitiesInBlock);
                         
                         for (int neighborId : candidates) {
-                            Double currWeight = counters.get(neighborId);
+                            Float currWeight = counters.get(neighborId);
                             if (currWeight == null) {
-                                currWeight = 0.0;
+                                currWeight = 0f;
                             }				
                             counters.put(neighborId, currWeight+weight1+weight2);
                         }
                     }
                     
                     //calculate the weights of each candidate match (edge in the blocking graph)
-                    Map<Integer, Double> weights = new HashMap<>();
-                    double entityWeight = totalWeights.get(entityId);
+                    Map<Integer, Float> weights = new HashMap<>();
+                    float entityWeight = totalWeights.get(entityId);
                     for (int neighborId : counters.keySet()) {
-			double currentWeight = counters.get(neighborId) / (Double.MIN_NORMAL + entityWeight + totalWeights.get(neighborId));
+			float currentWeight = counters.get(neighborId) / (Float.MIN_NORMAL + entityWeight + totalWeights.get(neighborId));
 			weights.put(neighborId, currentWeight);			
                     }
                     
