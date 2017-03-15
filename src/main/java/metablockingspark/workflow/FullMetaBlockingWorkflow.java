@@ -23,11 +23,14 @@ import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import metablockingspark.entityBased.EntityBasedCNP;
+import metablockingspark.entityBased.EntityBasedCNPInMemory;
 import metablockingspark.preprocessing.BlockFiltering;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
 import metablockingspark.preprocessing.EntityWeightsWJS;
+import metablockingspark.utils.MyKryoRegistrator;
 import metablockingspark.utils.Utils;
+import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
@@ -69,12 +72,28 @@ public class FullMetaBlockingWorkflow {
             }
         }
                        
+        final int NUM_CORES_IN_CLUSTER = 128; //128 in ISL cluster, 28 in okeanos cluster
+                       
         SparkSession spark = SparkSession.builder()
-            .appName("MetaBlocking on "+inputPath.substring(inputPath.lastIndexOf("/")+1))
+            .appName("MetaBlocking WJS on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1)) 
             .config("spark.sql.warehouse.dir", tmpPath)
             .config("spark.eventLog.enabled", true)
-            .config("spark.default.parallelism", 420) 
-            //.master(master)
+            .config("spark.default.parallelism", NUM_CORES_IN_CLUSTER * 4) //x tasks for each core (128 cores) --> x "reduce" rounds
+            .config("spark.rdd.compress", true)
+            
+            //memory configurations (deprecated)            
+            .config("spark.memory.useLegacyMode", true)
+            .config("spark.shuffle.memoryFraction", 0.4)
+            .config("spark.storage.memoryFraction", 0.4)                
+            .config("spark.memory.offHeap.enabled", true)
+            .config("spark.memory.offHeap.size", "10g")            
+            
+            //un-comment the following for Kryo serializer (does not seem to improve compression, only speed)            
+            /*
+            .config("spark.kryo.registrator", MyKryoRegistrator.class.getName())
+            .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+            .config("spark.kryo.registrationRequired", true) //just to be safe that everything is serialized as it should be (otherwise runtime error)
+            */
             .getOrCreate();        
         
         JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());        
@@ -134,11 +153,12 @@ public class FullMetaBlockingWorkflow {
         
         //CNP
         System.out.println("\n\nStarting CNP...");
+        //EntityBasedCNPInMemory cnp = new EntityBasedCNPInMemory();
         EntityBasedCNP cnp = new EntityBasedCNP();
-        JavaPairRDD<Integer,Integer[]> metablockingResults = cnp.run(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
+        JavaPairRDD<Integer,IntArrayList> metablockingResults = cnp.run(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
         
         metablockingResults
-                .mapValues(x -> Arrays.toString(x)).saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)
+                .mapValues(x -> Arrays.toString(x.elements())).saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)
         System.out.println("Job finished successfully. Output written in "+outputPath);
     }
     

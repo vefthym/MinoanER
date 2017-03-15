@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import metablockingspark.utils.Utils;
+import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import scala.Tuple2;
 
@@ -34,7 +35,7 @@ public class EntityBasedCNPCBSUncompressed {
         
         //map phase
         //resulting RDD is of the form <entityId, [candidateMatchIds]>
-        JavaPairRDD<Integer, Integer[]> mapOutput = blocksFromEI.flatMapToPair(x -> {            
+        JavaPairRDD<Integer, IntArrayList> mapOutput = blocksFromEI.flatMapToPair(x -> {            
             List<Integer> positives = new ArrayList<>();
             List<Integer> negatives = new ArrayList<>();
 		
@@ -48,18 +49,21 @@ public class EntityBasedCNPCBSUncompressed {
             if (positives.isEmpty() || negatives.isEmpty()) {
                 return null;
             }
-                        
-            Integer[] positivesArray = positives.toArray(new Integer[positives.size()]);             
-            Integer[] negativesArray = negatives.toArray(new Integer[negatives.size()]);                         
             
-            List<Tuple2<Integer,Integer[]>> mapResults = new ArrayList<>();                         
+            int[] positivesArray = positives.stream().mapToInt(i->i).toArray();
+            int[] negativesArray = negatives.stream().mapToInt(i->i).toArray();
+                        
+            IntArrayList positivesToEmit = new IntArrayList(positivesArray);                        
+            IntArrayList negativesToEmit = new IntArrayList(negativesArray);
+            
+            List<Tuple2<Integer,IntArrayList>> mapResults = new ArrayList<>();                         
             //emit all the negative entities array for each positive entity             
             for (int i = 0; i < positivesArray.length; ++i) {                                
-                mapResults.add(new Tuple2<>(positivesArray[i], negativesArray));
+                mapResults.add(new Tuple2<>(positivesArray[i], negativesToEmit));
             }                            
             //emit all the positive entities array for each negative entity             
             for (int i = 0; i < negativesArray.length; ++i) {                 
-                mapResults.add(new Tuple2<>(negativesArray[i], positivesArray));                            
+                mapResults.add(new Tuple2<>(negativesArray[i], positivesToEmit));                            
             }                         
             return mapResults.iterator();         
         })         
@@ -73,14 +77,14 @@ public class EntityBasedCNPCBSUncompressed {
                     
                     //find number of common blocks
                     Map<Integer,Double> counters = new HashMap<>(); //number of common blocks with current entity per candidate match
-                    for(Integer[] neighbors : x._2()) {      //neighbors in the blocking graph           
+                    for(IntArrayList neighbors : x._2()) {      //neighbors in the blocking graph           
                         for (int neighborId : neighbors) {                             
-                            Double count = counters.get(neighborId);                             
-                            if (count == null) {                                 
-                                count = 0.0;                             
-                            }				                            
-                            counters.put(neighborId, count+1);                         
-                        }                     
+                            Double count = counters.get(neighborId);
+                            if (count == null) {
+                                count = 0.0;
+                            }
+                            counters.put(neighborId, count+1);
+                        }
                     }
                     
                     //keep the top-K weights

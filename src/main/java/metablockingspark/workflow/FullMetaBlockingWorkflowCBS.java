@@ -71,25 +71,27 @@ public class FullMetaBlockingWorkflowCBS {
         final int NUM_CORES_IN_CLUSTER = 128;
                        
         SparkSession spark = SparkSession.builder()
-            .appName("MetaBlocking on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1)) 
+            .appName("MetaBlocking CBS on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1)) 
             .config("spark.sql.warehouse.dir", tmpPath)
             .config("spark.eventLog.enabled", true)
             .config("spark.default.parallelism", NUM_CORES_IN_CLUSTER * 4) //x tasks for each core (128 cores) --> x "reduce" rounds
             .config("spark.rdd.compress", true)
             
-            //memory configurations (deprecated)
+            //memory configurations (deprecated)            
             .config("spark.memory.useLegacyMode", true)
             .config("spark.shuffle.memoryFraction", 0.4)
-            .config("spark.storage.memoryFraction", 0.4)
+            .config("spark.storage.memoryFraction", 0.4) 
+                
             .config("spark.memory.offHeap.enabled", true)
             .config("spark.memory.offHeap.size", "10g")
             
             
             //un-comment the following for Kryo serializer (does not seem to improve compression, only speed)            
+            /*
             .config("spark.kryo.registrator", MyKryoRegistrator.class.getName())
             .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
             .config("spark.kryo.registrationRequired", true) //just to be safe that everything is serialized as it should be (otherwise runtime error)
-            
+            */
             
             //.master(master)
             .getOrCreate();        

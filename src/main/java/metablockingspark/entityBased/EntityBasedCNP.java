@@ -16,17 +16,16 @@
 
 package metablockingspark.entityBased;
 
+import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import metablockingspark.utils.Utils;
+import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.broadcast.Broadcast;
-import org.apache.spark.storage.StorageLevel;
 import scala.Serializable;
 import scala.Tuple2;
 
@@ -36,10 +35,10 @@ import scala.Tuple2;
  */
 public class EntityBasedCNP implements Serializable {
     
-    public JavaPairRDD<Integer,Integer[]> run(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, Broadcast<JavaPairRDD<Integer,Float>> totalWeightsBV, int K, long numNegativeEntities, long numPositiveEntities) {
+    public JavaPairRDD<Integer,IntArrayList> run(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, Broadcast<JavaPairRDD<Integer,Float>> totalWeightsBV, int K, long numNegativeEntities, long numPositiveEntities) {
         
         //map phase
-        JavaPairRDD<Integer, Integer[]> mapOutput = blocksFromEI.flatMapToPair(x -> {            
+        JavaPairRDD<Integer, IntArrayList> mapOutput = blocksFromEI.flatMapToPair(x -> {            
             List<Integer> positives = new ArrayList<>();
             List<Integer> negatives = new ArrayList<>();
 		
@@ -53,20 +52,23 @@ public class EntityBasedCNP implements Serializable {
             if (positives.isEmpty() || negatives.isEmpty()) {
                 return null;
             }
+                        
+            int[] positivesArray = positives.stream().mapToInt(i->i).toArray();
+            int[] negativesArray = negatives.stream().mapToInt(i->i).toArray();
             
-            Integer[] positivesArray = positives.toArray(new Integer[positives.size()]);
-            Integer[] negativesArray = negatives.toArray(new Integer[negatives.size()]);
+            IntArrayList positivesToEmit = new IntArrayList(positivesArray);
+            IntArrayList negativesToEmit = new IntArrayList(negatives.stream().mapToInt(i->i).toArray());
             
-            List<Tuple2<Integer,Integer[]>> mapResults = new ArrayList<>();
+            List<Tuple2<Integer,IntArrayList>> mapResults = new ArrayList<>();
             
             //emit all the negative entities array for each positive entity
             for (int i = 0; i < positivesArray.length; ++i) {                
-                mapResults.add(new Tuple2<>(positivesArray[i], negativesArray));                
+                mapResults.add(new Tuple2<>(positivesArray[i], negativesToEmit));                
             }
 
             //emit all the positive entities array for each negative entity
             for (int i = 0; i < negativesArray.length; ++i) {
-                mapResults.add(new Tuple2<>(negativesArray[i], positivesArray));                
+                mapResults.add(new Tuple2<>(negativesArray[i], positivesToEmit));                
             }
             
             return mapResults.iterator();
@@ -77,11 +79,10 @@ public class EntityBasedCNP implements Serializable {
         //System.out.println(totalWeightsRDD.count()+ " total weights found");
         
         //mapOutput is in the form : <entityId, [neighborIds]>
-        JavaPairRDD<Integer,Iterable<Integer[]>> entitiesBlocks = mapOutput.groupByKey(336); //(entityId, Iterable<[neighborIds]>)     //shuffle 1 (or 5)
+        JavaPairRDD<Integer,Iterable<IntArrayList>> entitiesBlocks = mapOutput.groupByKey(); //(entityId, Iterable<[neighborIds]>)     //shuffle 1 (or 5)
+        //entitiesBlocks is in the form: <entityId, Iterable[neighborIds]>        
         
-        
-        
-        JavaPairRDD<Integer,Integer[]> neighborsRDD; //an array of unique neighbor ids per entityId
+        JavaPairRDD<Integer,IntArrayList> neighborsRDD; //an array of unique neighbor ids per entityId
         /*neighborsRDD = mapOutput.aggregateByKey(     //shuffle 1
                 new HashSet<Integer>(), 
                 (x,y) -> {x.addAll(Arrays.asList(y)); return x;}, 
@@ -90,11 +91,11 @@ public class EntityBasedCNP implements Serializable {
         */
         // alternative for neighborsRDD
         neighborsRDD = entitiesBlocks.mapToPair(x -> {  //equivalent to mapOutput.aggregateByKey, but uses the cached entitiesBlocks
-            Set<Integer> neighbors = new HashSet<>();
-            for (Integer[] candidates : x._2()) {
-                neighbors.addAll(Arrays.asList(candidates));
+            IntOpenHashSet neighbors  = new IntOpenHashSet();
+            for (IntArrayList candidates : x._2()) {
+                neighbors.addAll(candidates);
             }
-            return new Tuple2<>(x._1(), neighbors.toArray(new Integer[neighbors.size()]));
+            return new Tuple2<>(x._1(), new IntArrayList(neighbors.toIntArray()));
         });
         
         
@@ -108,36 +109,32 @@ public class EntityBasedCNP implements Serializable {
             reversed.add(new Tuple2<>(eId,eId));
             return reversed.iterator();
         }) // (neighborId, eId)
-        .join(totalWeightsRDD,336) // (neighborId, <eId, weight(neighborId)>        //shuffle 2
+        .join(totalWeightsRDD) // (neighborId, <eId, weight(neighborId)>        //shuffle 2
         .mapToPair(x -> {
             return new Tuple2<>(x._2()._1(), new Tuple2<>(x._1(), x._2()._2()));
         }) //<eId, <neighborId, weight(neighborId)>>        
-        .groupByKey(336) //<eId, Iterable<neighborId, weight(neighborId)>>     //shuffle 3
-        .join(entitiesBlocks, 336) //<eId, (<Iterable<neighborId, weight(neighborId)>, Iterable<[neighborIds]>)>     //shuffle 4   
+        .groupByKey() //<eId, Iterable<neighborId, weight(neighborId)>>     //shuffle 3
+        .join(entitiesBlocks) //<eId, (<Iterable<neighborId, weight(neighborId)>, Iterable<[neighborIds]>)>     //shuffle 4   
                 
         .mapToPair(x -> {
             Integer entityId = x._1();
-            //compute the numerators
-            Map<Integer,Float> counters = new HashMap<>(); //number of common blocks with current entity per candidate match
-            for(Integer[] candidates : x._2()._2()) { //for each block (as an array of entities)              
+            //compute the numerators            
+            Int2FloatOpenHashMap counters = new Int2FloatOpenHashMap(); //number of common blocks with current entity per candidate match
+            for(IntArrayList candidates : x._2()._2()) { //for each block (as an array of entities)              
                 int numNegativeEntitiesInBlock = getNumNegativeEntitiesInBlock(candidates);
-                int numPositiveEntitiesInBlock = candidates.length - numNegativeEntitiesInBlock;
+                int numPositiveEntitiesInBlock = candidates.size() - numNegativeEntitiesInBlock;
                 float weight1 = (float) Math.log10((double)numNegativeEntities/numNegativeEntitiesInBlock);
                 float weight2 = (float) Math.log10((double)numPositiveEntities/numPositiveEntitiesInBlock);
 
                 for (int neighborId : candidates) {
-                    Float currWeight = counters.get(neighborId);
-                    if (currWeight == null) {
-                        currWeight = 0f;
-                    }				
-                    counters.put(neighborId, currWeight+weight1+weight2);
+                    counters.addTo(neighborId, weight1+weight2);                    
                 }
             }
             
             //retrive the totalWeights only for the local entities
-            Map<Integer, Float> localEntityWeights = new HashMap<>();
+            Int2FloatOpenHashMap localEntityWeights = new Int2FloatOpenHashMap();            
             for (Tuple2<Integer, Float> weight : x._2()._1()) {
-                localEntityWeights.put(weight._1(), weight._2());
+                localEntityWeights.put(weight._1().intValue(), weight._2().floatValue());
             }            
          
             //calculate the weights of each candidate match (edge in the blocking graph)
@@ -150,70 +147,17 @@ public class EntityBasedCNP implements Serializable {
 
             //keep the top-K weights
             weights = Utils.sortByValue(weights);                    
-            Integer[] candidateMatchesSorted = new Integer[Math.min(weights.size(), K)];                    
+            int[] candidateMatchesSorted = new int[Math.min(weights.size(), K)];                    
 
             int i = 0;
-            for (Integer neighbor : weights.keySet()) {
+            for (int neighbor : weights.keySet()) {
                 if (i == weights.size() || i == K) {
                     break;
                 }
                 candidateMatchesSorted[i++] = neighbor;                        
             }
-            return new Tuple2<Integer,Integer[]>(entityId, candidateMatchesSorted);
-        });       
-        
-        
-        
-        //the following is cheap to compute (one shuffle needed), but can easily give OOM error
-        /*
-        Map<Integer,Float> totalWeights = totalWeightsRDD.collectAsMap(); //cause of OOM error
-        
-        //reduce phase
-        //metaBlockingResults: key: an entityId, value: an array of topK candidate matches, in descending order of score (match likelihood)
-        return mapOutput.groupByKey() //for each entity create an iterable of arrays of candidate matches (one array from each common block)
-                .mapToPair(x -> {
-                    Integer entityId = x._1();
-                    
-                    //compute the numerators
-                    Map<Integer,Float> counters = new HashMap<>(); //number of common blocks with current entity per candidate match
-                    for(Integer[] candidates : x._2()) {                       
-                        int numNegativeEntitiesInBlock = getNumNegativeEntitiesInBlock(candidates);
-                        int numPositiveEntitiesInBlock = candidates.length - numNegativeEntitiesInBlock;
-                        float weight1 = (float) Math.log10((double)numNegativeEntities/numNegativeEntitiesInBlock);
-                        float weight2 = (float) Math.log10((double)numPositiveEntities/numPositiveEntitiesInBlock);
-                        
-                        for (int neighborId : candidates) {
-                            Float currWeight = counters.get(neighborId);
-                            if (currWeight == null) {
-                                currWeight = 0f;
-                            }				
-                            counters.put(neighborId, currWeight+weight1+weight2);
-                        }
-                    }
-                    
-                    //calculate the weights of each candidate match (edge in the blocking graph)
-                    Map<Integer, Float> weights = new HashMap<>();
-                    float entityWeight = totalWeights.get(entityId);
-                    for (int neighborId : counters.keySet()) {
-			float currentWeight = counters.get(neighborId) / (Float.MIN_NORMAL + entityWeight + totalWeights.get(neighborId));
-			weights.put(neighborId, currentWeight);			
-                    }
-                    
-                    //keep the top-K weights
-                    weights = Utils.sortByValue(weights);                    
-                    Integer[] candidateMatchesSorted = new Integer[Math.min(weights.size(), K)];                    
-                    
-                    int i = 0;
-                    for (Integer neighbor : weights.keySet()) {
-                        if (i == weights.size() || i == K) {
-                            break;
-                        }
-                        candidateMatchesSorted[i++] = neighbor;                        
-                    }
-                    
-                    return new Tuple2<Integer,Integer[]>(entityId, candidateMatchesSorted);
-                });
-                */
+            return new Tuple2<Integer,IntArrayList>(entityId, new IntArrayList(candidateMatchesSorted));
+        });               
     }
                 
     private int getNumNegativeEntitiesInBlock(Integer[] candidates) {
@@ -224,6 +168,10 @@ public class EntityBasedCNP implements Serializable {
             }
         }
         return count;
+    }
+    
+    private int getNumNegativeEntitiesInBlock(IntArrayList candidates) {        
+        return (int) candidates.stream().filter(x -> x<0).count();        
     }
     
 }
