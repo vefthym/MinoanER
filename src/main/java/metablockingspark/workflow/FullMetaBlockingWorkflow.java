@@ -153,12 +153,12 @@ public class FullMetaBlockingWorkflow {
         
         //CNP
         System.out.println("\n\nStarting CNP...");
-        //EntityBasedCNPInMemory cnp = new EntityBasedCNPInMemory();
-        EntityBasedCNP cnp = new EntityBasedCNP();
+        EntityBasedCNPInMemory cnp = new EntityBasedCNPInMemory();
+//        EntityBasedCNP cnp = new EntityBasedCNP();
         JavaPairRDD<Integer,IntArrayList> metablockingResults = cnp.run(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
         
         metablockingResults
-                .mapValues(x -> Arrays.toString(x.elements())).saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)
+                .mapValues(x -> x.toString()).saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)
         System.out.println("Job finished successfully. Output written in "+outputPath);
     }
     

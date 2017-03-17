@@ -18,17 +18,13 @@ package metablockingspark.entityBased;
 
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.broadcast.Broadcast;
-import org.apache.spark.storage.StorageLevel;
 import scala.Serializable;
 import scala.Tuple2;
 
@@ -81,9 +77,14 @@ public class EntityBasedCNPInMemory implements Serializable {
         JavaPairRDD<Integer,Float> totalWeightsRDD = totalWeightsBV.value();
         //System.out.println(totalWeightsRDD.count()+ " total weights found");
         
+        Int2FloatOpenHashMap totalWeights = new Int2FloatOpenHashMap(); //saves memory by storing data as primitive types        
+        totalWeightsRDD.foreach(entry -> {
+            totalWeights.put(entry._1().intValue(), entry._2().floatValue());
+        });
+        totalWeightsBV.unpersist();
         
         //the following is cheap to compute (one shuffle needed), but can easily give OOM error        
-        Map<Integer,Float> totalWeights = totalWeightsRDD.collectAsMap(); //possible cause of OOM error
+        //Map<Integer,Float> totalWeights = totalWeightsRDD.collectAsMap(); //possible cause of OOM error
         
         //reduce phase
         //metaBlockingResults: key: an entityId, value: an array of topK candidate matches, in descending order of score (match likelihood)
@@ -106,7 +107,7 @@ public class EntityBasedCNPInMemory implements Serializable {
                     
                     //calculate the weights of each candidate match (edge in the blocking graph)
                     Map<Integer, Float> weights = new HashMap<>();
-                    float entityWeight = totalWeights.get(entityId);
+                    float entityWeight = totalWeights.get(entityId.intValue());
                     for (int neighborId : counters.keySet()) {
 			float currentWeight = counters.get(neighborId) / (Float.MIN_NORMAL + entityWeight + totalWeights.get(neighborId));
 			weights.put(neighborId, currentWeight);			
@@ -126,16 +127,6 @@ public class EntityBasedCNPInMemory implements Serializable {
                     
                     return new Tuple2<Integer,IntArrayList>(entityId, new IntArrayList(candidateMatchesSorted));
                 });               
-    }
-                
-    private int getNumNegativeEntitiesInBlock(Integer[] candidates) {
-        int count = 0;
-        for (Integer candidate : candidates) {
-            if (candidate < 0) {
-                count++;
-            }
-        }
-        return count;
     }
     
     private int getNumNegativeEntitiesInBlock(IntArrayList candidates) {        
