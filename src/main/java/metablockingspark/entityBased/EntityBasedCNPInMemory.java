@@ -34,7 +34,7 @@ import scala.Tuple2;
  */
 public class EntityBasedCNPInMemory implements Serializable {
     
-    public JavaPairRDD<Integer,IntArrayList> run(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, Broadcast<JavaPairRDD<Integer,Float>> totalWeightsBV, int K, long numNegativeEntities, long numPositiveEntities) {
+    public JavaPairRDD<Integer,IntArrayList> run(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, Broadcast<Int2FloatOpenHashMap> totalWeightsBV, int K, long numNegativeEntities, long numPositiveEntities) {
         
         //map phase
         JavaPairRDD<Integer, IntArrayList> mapOutput = blocksFromEI.flatMapToPair(x -> {            
@@ -74,14 +74,9 @@ public class EntityBasedCNPInMemory implements Serializable {
         })
         .filter(x-> x != null);
         
-        JavaPairRDD<Integer,Float> totalWeightsRDD = totalWeightsBV.value();
-        //System.out.println(totalWeightsRDD.count()+ " total weights found");
-        
-        Int2FloatOpenHashMap totalWeights = new Int2FloatOpenHashMap(); //saves memory by storing data as primitive types        
-        totalWeightsRDD.foreach(entry -> {
-            totalWeights.put(entry._1().intValue(), entry._2().floatValue());
-        });
+        Int2FloatOpenHashMap totalWeights = totalWeightsBV.value(); //saves memory by storing data as primitive types                
         totalWeightsBV.unpersist();
+        totalWeightsBV.destroy();
         
         //the following is cheap to compute (one shuffle needed), but can easily give OOM error        
         //Map<Integer,Float> totalWeights = totalWeightsRDD.collectAsMap(); //possible cause of OOM error

@@ -16,6 +16,7 @@
 
 package metablockingspark.workflow;
 
+import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.Arrays;
@@ -128,12 +129,13 @@ public class FullMetaBlockingWorkflow {
         
         
         //get the total weights of each entity, required by WJS weigthing scheme (only)
-        //Broadcast<JavaPairRDD<Integer, Iterable<Integer>>> blocksFromEI_BV = jsc.broadcast(blocksFromEI);
         System.out.println("\n\nStarting EntityWeightsWJS...");
-        EntityWeightsWJS wjsWeights = new EntityWeightsWJS();
-        Broadcast<JavaPairRDD<Integer,Float>> totalWeights_BV = jsc.broadcast(wjsWeights.getWeights(blocksFromEI, entityIndex)); //double[] cannot be used, because some entityIds are negative
-        //System.out.println("Total weights contain weights for "+totalWeights.size()+" entities.");
-        //Broadcast<Map<Integer,Double>> totalWeights_BV = jsc.broadcast(totalWeights);
+        EntityWeightsWJS wjsWeights = new EntityWeightsWJS();        
+        Int2FloatOpenHashMap totalWeights = new Int2FloatOpenHashMap(); //saves memory by storing data as primitive types        
+        wjsWeights.getWeights(blocksFromEI, entityIndex).foreach(entry -> {
+            totalWeights.put(entry._1().intValue(), entry._2().floatValue());
+        });
+        Broadcast<Int2FloatOpenHashMap> totalWeights_BV = jsc.broadcast(totalWeights);
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
         final int K = ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
@@ -154,7 +156,7 @@ public class FullMetaBlockingWorkflow {
         //CNP
         System.out.println("\n\nStarting CNP...");
         EntityBasedCNPInMemory cnp = new EntityBasedCNPInMemory();
-//        EntityBasedCNP cnp = new EntityBasedCNP();
+        //EntityBasedCNP cnp = new EntityBasedCNP();
         JavaPairRDD<Integer,IntArrayList> metablockingResults = cnp.run(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
         
         metablockingResults
