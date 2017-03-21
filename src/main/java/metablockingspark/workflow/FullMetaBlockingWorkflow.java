@@ -101,7 +101,6 @@ public class FullMetaBlockingWorkflow {
         LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();
         
         
-        
         ////////////////////////
         //start the processing//
         ////////////////////////
@@ -110,7 +109,7 @@ public class FullMetaBlockingWorkflow {
         System.out.println("\n\nStarting BlockFiltering, reading from "+inputPath);
         
         BlockFilteringAdvanced bf = new BlockFilteringAdvanced();
-        JavaPairRDD<Integer,Integer[]> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
+        JavaPairRDD<Integer,IntArrayList> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
         entityIndex.cache();
         //entityIndex.persist(StorageLevel.DISK_ONLY_2()); //store to disk with replication factor 2
         
@@ -124,7 +123,7 @@ public class FullMetaBlockingWorkflow {
         LongAccumulator NUM_COMPARISONS_ACCUM = jsc.sc().longAccumulator();
         
         BlocksFromEntityIndex bFromEI = new BlocksFromEntityIndex();
-        JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
+        JavaPairRDD<Integer, IntArrayList> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
         blocksFromEI.persist(StorageLevel.DISK_ONLY());
         
         

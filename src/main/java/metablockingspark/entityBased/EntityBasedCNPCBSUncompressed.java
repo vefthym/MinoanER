@@ -16,9 +16,7 @@
 
 package metablockingspark.entityBased;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
@@ -31,43 +29,11 @@ import scala.Tuple2;
  */
 public class EntityBasedCNPCBSUncompressed {
 
-    public JavaPairRDD<Integer,Integer[]> run(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, int K) {
+    public JavaPairRDD<Integer,Integer[]> run(JavaPairRDD<Integer, IntArrayList> blocksFromEI, int K) {
         
         //map phase
         //resulting RDD is of the form <entityId, [candidateMatchIds]>
-        JavaPairRDD<Integer, IntArrayList> mapOutput = blocksFromEI.flatMapToPair(x -> {            
-            List<Integer> positives = new ArrayList<>();
-            List<Integer> negatives = new ArrayList<>();
-		
-            for (int entityId : x._2()) { 
-                if (entityId < 0) {
-                    negatives.add(entityId);
-                } else {
-                    positives.add(entityId);
-                }
-            }
-            if (positives.isEmpty() || negatives.isEmpty()) {
-                return null;
-            }
-            
-            int[] positivesArray = positives.stream().mapToInt(i->i).toArray();
-            int[] negativesArray = negatives.stream().mapToInt(i->i).toArray();
-                        
-            IntArrayList positivesToEmit = new IntArrayList(positivesArray);                        
-            IntArrayList negativesToEmit = new IntArrayList(negativesArray);
-            
-            List<Tuple2<Integer,IntArrayList>> mapResults = new ArrayList<>();                         
-            //emit all the negative entities array for each positive entity             
-            for (int i = 0; i < positivesArray.length; ++i) {                                
-                mapResults.add(new Tuple2<>(positivesArray[i], negativesToEmit));
-            }                            
-            //emit all the positive entities array for each negative entity             
-            for (int i = 0; i < negativesArray.length; ++i) {                 
-                mapResults.add(new Tuple2<>(negativesArray[i], positivesToEmit));                            
-            }                         
-            return mapResults.iterator();         
-        })         
-        .filter(x-> x != null);
+        JavaPairRDD<Integer, IntArrayList> mapOutput = EntityBasedCNPMapPhase.getMapOutput(blocksFromEI);
         
         //reduce phase
         //metaBlockingResults: key: an entityId, value: an array of topK candidate matches, in descending order of score (match likelihood)

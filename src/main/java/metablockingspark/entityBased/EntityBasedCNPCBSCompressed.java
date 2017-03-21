@@ -29,6 +29,7 @@ import org.apache.spark.api.java.JavaPairRDD;
 import scala.Tuple2;
 
 /**
+ * @deprecated use EntityBasedCNPInMemory
  * Entity based approach for CNP pruning (local top-k) using the CBS (common blocks) weighting scheme. 
  * @author vefthym
  */

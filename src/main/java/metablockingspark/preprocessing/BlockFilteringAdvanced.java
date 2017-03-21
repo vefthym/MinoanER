@@ -16,21 +16,14 @@
 
 package metablockingspark.preprocessing;
 
-import com.google.common.collect.Ordering;
-import java.io.IOException;
-import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.logging.Level;
 import java.util.logging.Logger;
-import metablockingspark.utils.Utils;
+import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
-import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.sql.SparkSession;
-import org.apache.spark.storage.StorageLevel;
 import org.apache.spark.util.LongAccumulator;
 import scala.Tuple2;
 
@@ -42,18 +35,18 @@ public class BlockFilteringAdvanced {
     
     static final Logger logger = Logger.getLogger(BlockFilteringAdvanced.class.getName());
     
-    public JavaPairRDD<Integer, Integer[]> run(JavaRDD<String> blockingInput, LongAccumulator BLOCK_ASSIGNMENTS) {        
-        JavaPairRDD<Integer,Integer[]> parsedBlocks = parseBlockCollection(blockingInput);        
+    public JavaPairRDD<Integer, IntArrayList> run(JavaRDD<String> blockingInput, LongAccumulator BLOCK_ASSIGNMENTS) {        
+        JavaPairRDD<Integer,IntArrayList> parsedBlocks = parseBlockCollection(blockingInput);        
         
         JavaPairRDD<Integer,Tuple2<Integer,Integer>> entityBlocks = getEntityBlocksAdvanced(parsedBlocks);       
 
-        JavaPairRDD<Integer, Integer[]> entityIndex = getEntityIndex(entityBlocks, BLOCK_ASSIGNMENTS);
+        JavaPairRDD<Integer, IntArrayList> entityIndex = getEntityIndex(entityBlocks, BLOCK_ASSIGNMENTS);
         parsedBlocks.unpersist();
         return  entityIndex;
     }
     
     //resulting key:blockID, value:entityIds array                            
-    private JavaPairRDD<Integer,Integer[]> parseBlockCollection(JavaRDD<String> blockingInput) {
+    private JavaPairRDD<Integer,IntArrayList> parseBlockCollection(JavaRDD<String> blockingInput) {
         System.out.println("Parsing the blocking collection...");
         return blockingInput
             .map(line -> line.split("\t")) //split to [blockId, [entityIds]]
@@ -70,16 +63,16 @@ public class BlockFilteringAdvanced {
                     Integer entityId = Integer.parseInt(entity);			                    
                     outputEntities.add(entityId);
                 }
-                return new Tuple2<Integer, Integer[]>(blockId, outputEntities.toArray(new Integer[outputEntities.size()]));
+                return new Tuple2<>(blockId, new IntArrayList(outputEntities.stream().mapToInt(i->i).toArray()));
             })
             .filter(x -> x != null);
     }
     
     //input: a JavaPairRDD of key:blockID, value:entityIds array        
     //output: a JavaPairRDD of key:entityID, value: (blockId, blockUtility)
-    private JavaPairRDD<Integer, Tuple2<Integer, Integer>> getEntityBlocksAdvanced(JavaPairRDD<Integer, Integer[]> parsedBlocks) {
+    private JavaPairRDD<Integer, Tuple2<Integer, Integer>> getEntityBlocksAdvanced(JavaPairRDD<Integer, IntArrayList> parsedBlocks) {
         return parsedBlocks.flatMapToPair(block -> {
-            Integer[] entities = block._2();                
+            int[] entities = block._2().elements();                
             int numEntities = entities.length;
             int D1counter = 0;
             for (int entity : entities) {                                        
@@ -107,7 +100,7 @@ public class BlockFilteringAdvanced {
     
     //input: a JavaPairRDD of key:entityID, value: (blockId, blockUtility)
     //output: a JavaPairRDD of key:entityId, value: [blockIds] (filtered), i.e., an entity index
-    private JavaPairRDD<Integer, Integer[]> getEntityIndex(JavaPairRDD<Integer,Tuple2<Integer,Integer>> entityBlocks,  LongAccumulator BLOCK_ASSIGNMENTS) {        
+    private JavaPairRDD<Integer, IntArrayList> getEntityIndex(JavaPairRDD<Integer,Tuple2<Integer,Integer>> entityBlocks,  LongAccumulator BLOCK_ASSIGNMENTS) {        
         System.out.println("Creating the entity index...");
         
         return entityBlocks.groupByKey()                
@@ -126,9 +119,8 @@ public class BlockFilteringAdvanced {
                     blocksKept.add(blockId);
                     if (++indexedBlocks == MAX_BLOCKS) { break;} //comment-out this line to skip block filtering
                 }
-                Integer[] entityIndex = new Integer[blocksKept.size()];
-                entityIndex = blocksKept.toArray(entityIndex);
-                BLOCK_ASSIGNMENTS.add(entityIndex.length);
+                IntArrayList entityIndex = new IntArrayList(blocksKept.stream().mapToInt(i->i).toArray());                
+                BLOCK_ASSIGNMENTS.add(entityIndex.size());
 
                 return entityIndex;
             });    

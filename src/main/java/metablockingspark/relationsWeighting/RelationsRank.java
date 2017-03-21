@@ -129,14 +129,18 @@ public class RelationsRank {
     
     
     //TODO: remove this method, keeping int entity ids instead of urls
-    public JavaPairRDD<String, Iterable<Tuple2<String, String>>> getRawEntities(JavaRDD<String> rawTriples, String SEPARATOR) {
+    public JavaPairRDD<String, Iterable<Tuple2<String, String>>> getRawEntityRelations(JavaRDD<String> rawTriples, List<String> subjects, String SEPARATOR) {
         return rawTriples.mapToPair(line -> {
           String[] spo = line.split(SEPARATOR);
           if (spo.length != 3) {
               return null;
           }
+          if (!subjects.contains(spo[2])) { //not a relation
+              return null;
+          }
           return new Tuple2<>(spo[0], new Tuple2<>(spo[1], spo[2]));
         })
+        .filter (x -> x != null)
         .groupByKey();
     }
     
@@ -152,23 +156,23 @@ public class RelationsRank {
      */
     public JavaPairRDD<String, String[]> getTopNeighborsPerEntity(JavaPairRDD<String, Iterable<Tuple2<String,String>>> inputEntities, List<String> relationsRank, int K) {
         return inputEntities.mapValues(entityAtts -> {
-            PriorityQueue<CustomRelation> topK1 = new PriorityQueue<>(K);
+            PriorityQueue<CustomRelation> topK = new PriorityQueue<>(K);
             for (Tuple2<String,String> att : entityAtts) {
-                int relationRank = relationsRank.indexOf(att._2());          
+                int relationRank = relationsRank.indexOf(att._1());          
                 if (relationRank == -1) { //then this is not a relation
                    continue;
                 }  
-                CustomRelation curr = new CustomRelation(att._1(), relationRank);
-                topK1.add(curr);
-                if (topK1.size() > K) {
-                    topK1.poll();
+                CustomRelation curr = new CustomRelation(att._2(), relationRank);
+                topK.add(curr);
+                if (topK.size() > K) {
+                    topK.poll();
                 }
             }
             
-            String[] result = new String[topK1.size()];
+            String[] result = new String[topK.size()];
             int i = 0;
-            while (!topK1.isEmpty()) {
-                result[i++] = topK1.poll().getString();
+            while (!topK.isEmpty()) {
+                result[i++] = topK.poll().getString();
             }
             return result;            
         });
@@ -241,14 +245,15 @@ public class RelationsRank {
         
         
         List<String> subjects1 = null; //a list of (distinct) subject URLs, keeping insertion order (from original triples file)
+        List<String> subjects2 = null; //a list of (distinct) subject URLs, keeping insertion order (from original triples file)
         
-        JavaPairRDD<String, Iterable<Tuple2<String,String>>> rawEntities1 = rr.getRawEntities(rawTriples1, SEPARATOR);
-        JavaPairRDD<String, Iterable<Tuple2<String,String>>> rawEntities2 = rr.getRawEntities(rawTriples2, SEPARATOR);
+        JavaPairRDD<String, Iterable<Tuple2<String,String>>> rawEntityRelations1 = rr.getRawEntityRelations(rawTriples1, subjects1, SEPARATOR);
+        JavaPairRDD<String, Iterable<Tuple2<String,String>>> rawEntityRelations2 = rr.getRawEntityRelations(rawTriples2, subjects2, SEPARATOR);
         
         
-        //TODO: convert  the following results to JavaPairRDD<Integer, IntArrayList>, according to the entity ids given in blocking
-        JavaPairRDD<String, String[]> topNeighbors1 = rr.getTopNeighborsPerEntity(rawEntities1, relationsRank1, K);
-        JavaPairRDD<String, String[]> topNeighbors2 = rr.getTopNeighborsPerEntity(rawEntities2, relationsRank2, K);
+        //TODO: convert  the following results to JavaPairRDD<Integer, IntArrayList>, giving the same entity ids that blocking uses
+        JavaPairRDD<String, String[]> topNeighbors1 = rr.getTopNeighborsPerEntity(rawEntityRelations1, relationsRank1, K);
+        JavaPairRDD<String, String[]> topNeighbors2 = rr.getTopNeighborsPerEntity(rawEntityRelations2, relationsRank2, K);
         
         
         //TODO: for each entity pair whose top-neighbors share a common block, neighborSim = max value_sim of outNeighbors

@@ -18,6 +18,7 @@ package metablockingspark.preprocessing;
 
 import java.io.Serializable;
 import java.util.Map;
+import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.storage.StorageLevel;
@@ -44,18 +45,18 @@ public class EntityWeightsWJS implements Serializable {
         return numNegativeEntities;
     }
     
-    public JavaPairRDD<Integer, Float> getWeights(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, JavaPairRDD<Integer,Integer[]> entityIndex) {
+    public JavaPairRDD<Integer, Float> getWeights(JavaPairRDD<Integer, IntArrayList> blocksFromEI, JavaPairRDD<Integer,IntArrayList> entityIndex) {
         JavaRDD<Integer> entityIds = entityIndex.keys().cache();
         
         System.out.println("Getting blocksFromEI as a Map...");
         blocksFromEI.persist(StorageLevel.DISK_ONLY());
         Map<Integer, Integer> blockSizesMap = blocksFromEI
-                .mapValues(x -> (int) x.spliterator().getExactSizeIfKnown())                
+                .mapValues(x -> x.size())                
                 .collectAsMap();
         
         Map<Integer, Integer> numNegativeEntitiesInBlock = 
                 blocksFromEI
-                .mapValues(x -> getNumberOfNegativeEntitiesInBlock(x))
+                .mapValues(x -> (int)x.stream().filter(eId->eId<0).count())
                 .collectAsMap();
         
         
@@ -67,7 +68,7 @@ public class EntityWeightsWJS implements Serializable {
         System.out.println("Computing weights and storing them in the resulting RDD...");
         return entityIndex.mapToPair(entityInfo -> {
             int entityId = entityInfo._1();
-            Integer[] associatedBlocks = entityInfo._2();
+            int[] associatedBlocks = entityInfo._2().elements();
             float totalWeight = 0;            
             if (entityId < 0) {
                 for (int block : associatedBlocks) {                    
@@ -96,16 +97,5 @@ public class EntityWeightsWJS implements Serializable {
             }
             return new Tuple2<>(entityId, totalWeight);
         });
-    }
-    
-    private int getNumberOfNegativeEntitiesInBlock(Iterable<Integer> blockContents) {
-        int numNegatives = 0;
-        for (Integer entityId : blockContents) {
-            if (entityId < 0) {
-                numNegatives++;
-            }
-        }
-        return numNegatives;
-    }
-    
+    }    
 }

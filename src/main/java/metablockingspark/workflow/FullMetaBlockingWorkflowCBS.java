@@ -28,6 +28,7 @@ import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
 import metablockingspark.utils.MyKryoRegistrator;
 import metablockingspark.utils.Utils;
+import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.SparkSession;
@@ -111,7 +112,7 @@ public class FullMetaBlockingWorkflowCBS {
         System.out.println("\n\nStarting BlockFiltering, reading from "+inputPath);
         
         BlockFilteringAdvanced bf = new BlockFilteringAdvanced();
-        JavaPairRDD<Integer,Integer[]> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
+        JavaPairRDD<Integer,IntArrayList> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
         entityIndex.cache();
         //entityIndex.persist(StorageLevel.DISK_ONLY_2()); //store to disk with replication factor 2
         
@@ -125,7 +126,7 @@ public class FullMetaBlockingWorkflowCBS {
         LongAccumulator NUM_COMPARISONS_ACCUM = jsc.sc().longAccumulator();
         
         BlocksFromEntityIndex bFromEI = new BlocksFromEntityIndex();
-        JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
+        JavaPairRDD<Integer, IntArrayList> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
         blocksFromEI.persist(StorageLevel.DISK_ONLY());
         
         blocksFromEI.count(); //the simplest action just to run blocksFromEI and get the actual value for the counters below
