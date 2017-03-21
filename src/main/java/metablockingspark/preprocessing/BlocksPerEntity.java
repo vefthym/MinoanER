@@ -16,6 +16,7 @@
 
 package metablockingspark.preprocessing;
 
+import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.sql.SparkSession;
 
@@ -26,14 +27,14 @@ import org.apache.spark.sql.SparkSession;
 public class BlocksPerEntity {
     
     SparkSession spark;
-    JavaPairRDD<Integer,Integer[]> entityIndex;
+    JavaPairRDD<Integer,IntArrayList> entityIndex;
 
-    public BlocksPerEntity(SparkSession spark, JavaPairRDD<Integer, Integer[]> entityIndex) {
+    public BlocksPerEntity(SparkSession spark, JavaPairRDD<Integer, IntArrayList> entityIndex) {
         this.spark = spark;
         this.entityIndex = entityIndex;
     }
     
     public JavaPairRDD<Integer,Integer> run() {
-        return entityIndex.mapValues(x -> x.length);
+        return entityIndex.mapValues(x -> x.size());
     }    
 }

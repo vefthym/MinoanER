@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import metablockingspark.utils.Utils;
+import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
@@ -34,27 +35,27 @@ import org.apache.spark.util.LongAccumulator;
 import scala.Tuple2;
 
 /**
- *
+ * @deprecated use BlockFilteringAdvanced
  * @author vefthym
  */
 public class BlockFiltering {
     
     static final Logger logger = Logger.getLogger(BlockFiltering.class.getName());
     
-    public JavaPairRDD<Integer, Integer[]> run(JavaRDD<String> blockingInput, LongAccumulator BLOCK_ASSIGNMENTS) {        
-        JavaPairRDD<Integer,Integer[]> parsedBlocks = parseBlockCollection(blockingInput);
+    public JavaPairRDD<Integer, IntArrayList> run(JavaRDD<String> blockingInput, LongAccumulator BLOCK_ASSIGNMENTS) {        
+        JavaPairRDD<Integer,IntArrayList> parsedBlocks = parseBlockCollection(blockingInput);
         parsedBlocks.persist(StorageLevel.MEMORY_AND_DISK_SER());
         
         //add an integer rank to each blockId, starting with 0 (blocks are sorted in descending utility)
         Map<Integer,Long> blocksRanking = getBlockSizes(parsedBlocks).values().zipWithIndex().collectAsMap();         
 
-        JavaPairRDD<Integer, Integer[]> entityIndex = getEntityIndex(parsedBlocks, blocksRanking, BLOCK_ASSIGNMENTS);
+        JavaPairRDD<Integer, IntArrayList> entityIndex = getEntityIndex(parsedBlocks, blocksRanking, BLOCK_ASSIGNMENTS);
         parsedBlocks.unpersist();
-        return  entityIndex;
+        return entityIndex;
     }
     
     //resulting key:blockID, value:entityIds array                            
-    private JavaPairRDD<Integer,Integer[]> parseBlockCollection(JavaRDD<String> blockingInput) {
+    private JavaPairRDD<Integer,IntArrayList> parseBlockCollection(JavaRDD<String> blockingInput) {
         System.out.println("Parsing the blocking collection...");
         return blockingInput
             .map(line -> line.split("\t")) //split to [blockId, [entityIds]]
@@ -71,19 +72,19 @@ public class BlockFiltering {
                     Integer entityId = Integer.parseInt(entity);			                    
                     outputEntities.add(entityId);
                 }
-                return new Tuple2<Integer, Integer[]>(blockId, outputEntities.toArray(new Integer[outputEntities.size()]));
+                return new Tuple2<>(blockId, new IntArrayList(outputEntities.stream().mapToInt(i->i).toArray()));
             })
             .filter(x -> x != null);
     }
     
     //input: a JavaPairRDD of key:blockID, value:entityIds array        
     //outpu: a JavaPairRDD of key:inverseUtility (=max of D1 entities, D2 entities in this block), value:blockId (=input key)
-    public JavaPairRDD<Integer,Integer> getBlockSizes(JavaPairRDD<Integer,Integer[]> parsedBlocks) {
+    public JavaPairRDD<Integer,Integer> getBlockSizes(JavaPairRDD<Integer,IntArrayList> parsedBlocks) {
         System.out.println("Getting the block sizes...");
         return parsedBlocks         
             .mapToPair(pair -> {
                 int blockId = pair._1();
-                Integer[] entities = pair._2();
+                int[] entities = pair._2().elements();
                 
                 int numEntities = entities.length;
                 int D1counter = 0;
@@ -106,13 +107,13 @@ public class BlockFiltering {
             .sortByKey(false, 1); //save in descending utility order //TODO: check numPartitions      
     }
         
-    private JavaPairRDD<Integer, Integer[]> getEntityIndex(JavaPairRDD<Integer,Integer[]> parsedBlocks,  Map<Integer,Long> blocksRanking, LongAccumulator BLOCK_ASSIGNMENTS) {
+    private JavaPairRDD<Integer, IntArrayList> getEntityIndex(JavaPairRDD<Integer,IntArrayList> parsedBlocks,  Map<Integer,Long> blocksRanking, LongAccumulator BLOCK_ASSIGNMENTS) {
         System.out.println("Creating the entity index...");
         //get pairs of the form (entityId, blockId)
         JavaPairRDD<Integer, Integer> entityIndexMapperResult = parsedBlocks
             .flatMapToPair(pair -> {
                 int blockId = pair._1();
-                Integer[] entities = pair._2();
+                int[] entities = pair._2().elements();
                 
                 List<Tuple2<Integer,Integer>> mapResults = new ArrayList<>(); //possible (but not really probable) cause of OOM (memory errors) if huge blocks exist
                 for (int entity : entities) {                    
@@ -134,10 +135,9 @@ public class BlockFiltering {
                         blocksKept.add((int)blockId);
                         if (++indexedBlocks == MAX_BLOCKS) { break;} //comment-out this line to skip block filtering
                     }
-                    Integer[] entityIndex = new Integer[blocksKept.size()];
-                    entityIndex = blocksKept.toArray(entityIndex);
-                    BLOCK_ASSIGNMENTS.add(entityIndex.length);
-                    return new Tuple2<Integer,Integer[]>(pair._1(), entityIndex); //the entity index for the current entity
+                    IntArrayList entityIndex = new IntArrayList(blocksKept.stream().mapToInt(i->i).toArray());                    
+                    BLOCK_ASSIGNMENTS.add(entityIndex.size());
+                    return new Tuple2<>(pair._1(), entityIndex); //the entity index for the current entity
                 });                
 
     }
@@ -190,7 +190,7 @@ public class BlockFiltering {
         LongAccumulator BLOCK_ASSIGNMENTS = jsc.sc().longAccumulator();
         
         BlockFiltering bf = new BlockFiltering();
-        JavaPairRDD<Integer, Integer[]> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS); //input: a blocking collection
+        JavaPairRDD<Integer, IntArrayList> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS); //input: a blocking collection
         entityIndex.saveAsObjectFile(entityIndexOutputPath);
     }
     
