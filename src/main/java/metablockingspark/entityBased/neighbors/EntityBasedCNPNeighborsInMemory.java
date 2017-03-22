@@ -18,8 +18,16 @@ package metablockingspark.entityBased.neighbors;
 
 import metablockingspark.entityBased.*;
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.PriorityQueue;
+import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
+import org.apache.spark.api.java.function.Function;
+import org.apache.spark.api.java.function.Function2;
 import org.apache.spark.broadcast.Broadcast;
 import scala.Serializable;
 import scala.Tuple2;
@@ -39,7 +47,7 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
      * @param numPositiveEntities
      * @return key: a negative entityId, value: a list of pairs of candidate matches (positive entity ids) along with their value_sim with the key
      */
-    public JavaPairRDD<Integer,Int2FloatOpenHashMap> getValueSimForNegativeEntities(JavaPairRDD<Integer, IntArrayList> blocksFromEI, Broadcast<Int2FloatOpenHashMap> totalWeightsBV, int K, long numNegativeEntities, long numPositiveEntities) {
+    public JavaPairRDD<Integer,Int2FloatOpenHashMap> getTopKValueSims(JavaPairRDD<Integer, IntArrayList> blocksFromEI, Broadcast<Int2FloatOpenHashMap> totalWeightsBV, int K, long numNegativeEntities, long numPositiveEntities) {
         
         Int2FloatOpenHashMap totalWeights = totalWeightsBV.value(); //saves memory by storing data as primitive types                
         totalWeightsBV.unpersist();
@@ -50,7 +58,6 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
         //reduce phase
         //metaBlockingResults: key: a negative entityId, value: a list of candidate matches (positive entity ids) along with their value_sim with the key
         return mapOutput
-                .filter(x -> x._1() < 0) //symmetry of value_sim allows that (value_sim(-1,8) = value_sim(8,-1)), negative ids are less than positives
                 .groupByKey() //for each entity create an iterable of arrays of candidate matches (one array from each common block)
                 .mapToPair(x -> {
                     Integer entityId = x._1();
@@ -69,20 +76,124 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
                     }
                                         
                     //calculate the weight of each edge in the blocking graph (i.e., for each candidate match)
-                    Int2FloatOpenHashMap weights = new Int2FloatOpenHashMap();
+                    Map<Integer, Float> weights = new HashMap<>();
                     float entityWeight = totalWeights.get(entityId.intValue());
                     for (int neighborId : counters.keySet()) {
 			float currentWeight = counters.get(neighborId) / (Float.MIN_NORMAL + entityWeight + totalWeights.get(neighborId));
 			weights.put(neighborId, currentWeight);			
                     }
                     
-                    return new Tuple2<>(entityId, weights);
-                });               
+                    //keep the top-K weights
+                    weights = Utils.sortByValue(weights);                                        
+                    Int2FloatOpenHashMap weightsToEmit = new Int2FloatOpenHashMap();                                      
+                    int i = 0;
+                    for (int neighbor : weights.keySet()) {
+                        if (i == weights.size() || i == K) {
+                            break;
+                        }
+                        weightsToEmit.put(neighbor, (float)weights.get(neighbor));
+                    }
+                    
+                    return new Tuple2<>(entityId, weightsToEmit);
+                });          
     }    
     
     
-    public void getNeighborSims(JavaPairRDD<Integer, Iterable<Integer>> blocksFromEI, JavaPairRDD<Integer,Int2FloatOpenHashMap> valueSims, JavaPairRDD<Integer,IntArrayList> inNeighbors) {
+    /**
+     * Returns the neighborSim of each entity pair. 
+     * @param valueSims an RDD with the top-K value sims for each entity, in the form key: eid, value: (candidateMatch cId, value_sim(eId,cId))
+     * @param inNeighbors a Map with the top in-neighbors of each entity (the reverse of top-3 out-Neighbors). Possible cause of OutOfMemory error (try to make as compact as possible)
+     * @return the neighborSim of each entity pair, where entity pair is the key and neighborSim is the value
+     */
+    public JavaPairRDD<Tuple2<Integer, Integer>, Float> getNeighborSims(JavaPairRDD<Integer,Int2FloatOpenHashMap> valueSims, Map<Integer,IntArrayList> inNeighbors) {
+        
+       return valueSims.flatMapToPair(x->{
+            int eId = x._1();
+            IntArrayList eInNeighbors = inNeighbors.get(eId);
             
-        JavaPairRDD<Integer,Int2FloatOpenHashMap> neighborSims;
+            List<Tuple2<Tuple2<Integer,Integer>, Float>> partialNeighborSims = new ArrayList<>(); //key: (negativeEid, positiveEid), value: valueSim(outNeighbor(nEid),outNeighbor(pEid))
+            for (Map.Entry<Integer, Float> eIdValueCandidates : x._2().entrySet()) {
+                for (Integer eInNeighbor : eInNeighbors) {
+                    partialNeighborSims.add(new Tuple2<>(new Tuple2<>(eInNeighbor, eIdValueCandidates.getKey()), eIdValueCandidates.getValue()));
+                }
+            }
+            
+            return partialNeighborSims.iterator();
+        })
+        .reduceByKey((w1, w2) -> Math.max(w1, w2)); //for each entity pair, neighborSim = max value sim of its pairs of out-neighbors        
     }
+    
+    
+    public JavaPairRDD<Integer, IntArrayList> getTopKNeighborSims(JavaPairRDD<Tuple2<Integer, Integer>, Float> neighborSims, int K) {
+        return neighborSims.flatMapToPair(pair -> { //for each pair (e1,e2), value_sim(e1,e2)
+            List<Tuple2<Integer, Tuple2<Integer,Float>>> pairs = new ArrayList<>();
+            pairs.add(new Tuple2<>(pair._1()._1(), new Tuple2<>(pair._1()._2(), pair._2()))); //emit e1, (e2,value_sim(e1,e2))
+            pairs.add(new Tuple2<>(pair._1()._2(), new Tuple2<>(pair._1()._1(), pair._2()))); //emit e2, (e1,value_sim(e1,e2))
+            return pairs.iterator();
+        }).combineByKey( //should be faster than groupByKey (keeps local top-Ks before shuffling, like a combiner in MapReduce)
+            //createCombiner
+            x-> {
+                PriorityQueue<CustomCandidate> initial = new PriorityQueue<>();
+                initial.add(new CustomCandidate(x));
+                return initial; 
+            }
+            //mergeValue
+            , (PriorityQueue<CustomCandidate> pq, Tuple2<Integer,Float> tuple) -> {
+                pq.add(new CustomCandidate(tuple));
+                if (pq.size() > K) {
+                    pq.poll();
+                }
+                return pq;
+            }
+            //mergeCombiners
+            , (PriorityQueue<CustomCandidate> pq1, PriorityQueue<CustomCandidate> pq2) -> {
+                while (!pq2.isEmpty()) {
+                    CustomCandidate c = pq2.poll();
+                    pq1.add(c);
+                    if (pq1.size() > K) {
+                        pq1.poll();
+                    }
+                }
+                return pq1;
+            }
+        ).mapValues(x -> {      //just reverse the order of candidates and transform values to IntArrayList (topK are kept already)      
+            int i = x.size();            
+            IntArrayList candidates = new IntArrayList(x.size());            
+            while (!x.isEmpty()) {
+                candidates.add(--i, x.poll().getEntityId()); //get pq elements in reverse (i.e., descending neighbor sim) order
+            }
+            return new IntArrayList(candidates);
+        });
+    }
+
+/**
+ * Copied (and altered) from http://stackoverflow.com/a/16297127/2516301
+ */
+private static class CustomCandidate implements Comparable<CustomCandidate>, java.io.Serializable {
+    // public final fields ok for this small example
+    public final int entityId;
+    public final float value;
+
+    public CustomCandidate(Tuple2<Integer,Float> input) {
+        this.entityId = input._1();
+        this.value = input._2();
+    }
+
+    @Override
+    public int compareTo(CustomCandidate other) {
+        // define sorting according to float fields
+        return Float.compare(value, other.value); 
+    }
+    
+    public int getEntityId(){
+        return entityId;
+    }
+    
+    @Override
+    public String toString() {
+        return entityId+":"+value;
+    }
+}        
+    
+    
 }
