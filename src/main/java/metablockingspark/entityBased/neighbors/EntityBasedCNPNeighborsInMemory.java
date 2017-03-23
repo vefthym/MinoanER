@@ -23,11 +23,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
+import metablockingspark.relationsWeighting.RelationsRank;
 import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
-import org.apache.spark.api.java.function.Function;
-import org.apache.spark.api.java.function.Function2;
+import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.broadcast.Broadcast;
 import scala.Serializable;
 import scala.Tuple2;
@@ -38,6 +38,26 @@ import scala.Tuple2;
  */
 public class EntityBasedCNPNeighborsInMemory implements Serializable {
     
+    
+    public JavaPairRDD<Integer, IntArrayList> run(JavaPairRDD<Integer,Int2FloatOpenHashMap> topKvalueCandidates, 
+            JavaRDD<String> rawTriples1, 
+            JavaRDD<String> rawTriples2, 
+            String SEPARATOR, 
+            float MIN_SUPPORT_THRESHOLD,
+            int K,
+            int N) {
+        
+        Map<Integer,IntArrayList> inNeighbors = new HashMap<>(new RelationsRank().run(rawTriples1, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, true));
+        inNeighbors.putAll(new RelationsRank().run(rawTriples2, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, false));
+        
+        JavaPairRDD<Tuple2<Integer, Integer>, Float> neighborSims = getNeighborSims(topKvalueCandidates, inNeighbors);
+        
+        JavaPairRDD<Integer, IntArrayList> topKneighborCandidates =  getTopKNeighborSims(neighborSims, K);        
+        return topKneighborCandidates;
+    }
+    
+    
+    
     /**
      * 
      * @param blocksFromEI
@@ -45,7 +65,7 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
      * @param K
      * @param numNegativeEntities
      * @param numPositiveEntities
-     * @return key: a negative entityId, value: a list of pairs of candidate matches (positive entity ids) along with their value_sim with the key
+     * @return key: an entityId, value: a list of pairs of candidate matches along with their value_sim with the key
      */
     public JavaPairRDD<Integer,Int2FloatOpenHashMap> getTopKValueSims(JavaPairRDD<Integer, IntArrayList> blocksFromEI, Broadcast<Int2FloatOpenHashMap> totalWeightsBV, int K, long numNegativeEntities, long numPositiveEntities) {
         
@@ -114,7 +134,10 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
             List<Tuple2<Tuple2<Integer,Integer>, Float>> partialNeighborSims = new ArrayList<>(); //key: (negativeEid, positiveEid), value: valueSim(outNeighbor(nEid),outNeighbor(pEid))
             for (Map.Entry<Integer, Float> eIdValueCandidates : x._2().entrySet()) {
                 for (Integer eInNeighbor : eInNeighbors) {
-                    partialNeighborSims.add(new Tuple2<>(new Tuple2<>(eInNeighbor, eIdValueCandidates.getKey()), eIdValueCandidates.getValue()));
+                    if (eId < 0) 
+                        partialNeighborSims.add(new Tuple2<>(new Tuple2<>(eInNeighbor, eIdValueCandidates.getKey()), eIdValueCandidates.getValue()));
+                    else 
+                        partialNeighborSims.add(new Tuple2<>(new Tuple2<>(eIdValueCandidates.getKey(), eInNeighbor), eIdValueCandidates.getValue()));
                 }
             }
             
@@ -133,7 +156,7 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
         }).combineByKey( //should be faster than groupByKey (keeps local top-Ks before shuffling, like a combiner in MapReduce)
             //createCombiner
             x-> {
-                PriorityQueue<CustomCandidate> initial = new PriorityQueue<>();
+                PriorityQueue<CustomCandidate> initial = new PriorityQueue<>(K);
                 initial.add(new CustomCandidate(x));
                 return initial; 
             }

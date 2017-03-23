@@ -19,13 +19,17 @@ package metablockingspark.utils;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.spark.api.java.JavaRDD;
 
 /**
  *
@@ -59,5 +63,13 @@ public class Utils {
                 (e1, e2) -> e1, 
                 LinkedHashMap::new
               ));
+    }
+        
+    public static List<String> getEntityUrlsFromEntityRDDInOrder(JavaRDD<String> rawTriples, String SEPARATOR) {
+        return new ArrayList<>(
+                new LinkedHashSet<>(rawTriples
+                .map(line -> line.split(SEPARATOR)[0])
+                .collect())
+                ); //convert list to set (to remove duplicates) and back to list (to have index of each element)
     }
 }

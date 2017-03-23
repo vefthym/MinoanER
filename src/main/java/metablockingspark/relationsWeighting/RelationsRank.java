@@ -16,20 +16,16 @@
 package metablockingspark.relationsWeighting;
 
 import com.google.common.collect.Ordering;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import java.io.IOException;
 import java.io.Serializable;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
-import java.util.Set;
-import java.util.TreeMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import metablockingspark.preprocessing.BlockFiltering;
 import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
@@ -46,70 +42,108 @@ import scala.Tuple2;
 public class RelationsRank {
     
     /**
-     * Returns a list of relations sorted in descending score. 
+     * return a map of topN neighbors per entity
      * @param rawTriples
      * @param SEPARATOR
+     * @param MIN_SUPPORT_THRESHOLD
+     * @param N topN neighbors per entity
+     * @param positiveIds
+     * @return 
+     */
+    public Map<Integer,IntArrayList> run(JavaRDD<String> rawTriples, String SEPARATOR, float MIN_SUPPORT_THRESHOLD, int N, boolean positiveIds) {
+        rawTriples.persist(StorageLevel.MEMORY_AND_DISK_SER());        
+        
+        List<String> subjects = Utils.getEntityUrlsFromEntityRDDInOrder(rawTriples, SEPARATOR); //a list of (distinct) subject URLs, keeping insertion order (from original triples file)
+        System.out.println("Found "+subjects.size()+" entities in collection "+ (positiveIds?"1":"2"));
+                
+        JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex = getRelationIndex(rawTriples, SEPARATOR, subjects);        
+        
+        rawTriples.unpersist();        
+        relationIndex.persist(StorageLevel.MEMORY_AND_DISK_SER());        
+                        
+        List<String> relationsRank = getRelationsRank(relationIndex, MIN_SUPPORT_THRESHOLD, subjects);
+        
+        Map<Integer, IntArrayList> topNeighbors = getTopNeighborsPerEntity(relationIndex, relationsRank, N, positiveIds).collectAsMap();        
+        
+        relationIndex.unpersist(); 
+        
+        return topNeighbors;
+    }
+    
+    
+    
+    /**
+     * Returns a list of relations sorted in descending score.      
+     * @param relationIndex
      * @param minSupportThreshold the minimum support threshold allowed, used for filtering relations with lower support
+     * @param subjects a list of subjects in the same order as the entity ids used in blocking
      * @return a list of relations sorted in descending score.
      */
-    public List<String> run(JavaRDD<String> rawTriples, String SEPARATOR, float minSupportThreshold) {        
-        Set<String> subjects = getSubjects(rawTriples, SEPARATOR);
-        
-        JavaPairRDD<String,Iterable<Tuple2<String, String>>> relationIndex = getRelationIndex(rawTriples, SEPARATOR, subjects);        
-        
+    public List<String> getRelationsRank(JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex, float minSupportThreshold, List<String> subjects) {                        
         JavaPairRDD<String,Float> supports = getSupportOfRelations(relationIndex, (long)subjects.size() * subjects.size(), minSupportThreshold);
         JavaPairRDD<String,Float> discrims = getDiscriminabilityOfRelations(relationIndex);
         
         return getSortedRelations(supports, discrims);
     }
     
-    public Set<String> getSubjects (JavaRDD<String> rawTriples, String SEPARATOR) {
-        return new HashSet<>(rawTriples
-                .map(line -> line.split(SEPARATOR)[0])
-                .distinct()
-                .collect());
-    }
-    
-    public JavaPairRDD<String,Iterable<Tuple2<String, String>>> getRelationIndex(JavaRDD<String> rawTriples, String SEPARATOR, Set<String> subjects) {
+    /**
+     * Returns a relation index of the form: key: relationString, value: list of (subjectId, objectId) linked by this relation.
+     * @param rawTriples
+     * @param SEPARATOR
+     * @param subjects
+     * @return a relation index of the form: key: relationString, value: list of (subjectId, objectId) linked by this relation
+     */
+    public JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> getRelationIndex(JavaRDD<String> rawTriples, String SEPARATOR, List<String> subjects) {
         return rawTriples.mapToPair(line -> {
-          String[] spo = line.split(SEPARATOR);
+          String[] spo = line.replaceAll(" \\.$", "").split(SEPARATOR);
           if (spo.length != 3) {
               return null;
           }
-          return new Tuple2<>(spo[1], new Tuple2<>(spo[0], spo[2]));
+          Integer subjectId = subjects.indexOf(spo[0]); //replace subject url with entity id (subjects belongs to subjects by default)
+          Integer objectId = subjects.indexOf(spo[2]); //-1 if the object is not an entity, otherwise the entityId          
+          return new Tuple2<>(spo[1], new Tuple2<>(subjectId, objectId)); //relation, (subjectId, objectId)
         })
-        .filter (x -> {
-            if (x == null) {
-                return false;
-            }
+        .filter(x -> x!= null)
+        .groupByKey()       
+        .filter(x -> {
             int relationCount = 0;
             int numInstances = 0;
-            for (Tuple2<String,String> so : (Iterable<Tuple2<String,String>>)x._2()) {
+            for (Tuple2<Integer,Integer> so : x._2()) {
                 numInstances++;
-                if (subjects.contains(so._2())) {
+                if (so._2() != -1) {
                     relationCount++;
                 }
             }
             return relationCount > (numInstances-relationCount); //majority voting (is this property used more as a relation or as a datatype property?
         })
-        .groupByKey();        
+        .mapValues(x -> {
+            List<Tuple2<Integer,Integer>> relationsOnly = new ArrayList<>();
+            for (Tuple2<Integer,Integer> so : x) {                
+                if (so._2() != -1) {
+                    relationsOnly.add(new Tuple2<>(so._1(), so._2()));
+                } 
+            }
+            return relationsOnly;
+        });        
     }
     
-    public JavaPairRDD<String,Float> getSupportOfRelations(JavaPairRDD<String,Iterable<Tuple2<String, String>>> relationIndex, long numEntititiesSquared, float minSupportThreshold) {
+    public JavaPairRDD<String,Float> getSupportOfRelations(JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex, long numEntititiesSquared, float minSupportThreshold) {
         JavaPairRDD<String, Float> unnormalizedSupports = relationIndex
                 .mapValues(so -> (float) so.spliterator().getExactSizeIfKnown() / numEntititiesSquared);
+        unnormalizedSupports.cache();
         
-        float max_support = unnormalizedSupports.values().max(Ordering.natural()); //TODO: check if this is computed correctly without an action        
+        System.out.println(unnormalizedSupports.count()+" relations have been assigned a support value"); // dummy action);
+        float max_support = unnormalizedSupports.values().max(Ordering.natural());
         return unnormalizedSupports
                 .mapValues(x-> x/max_support)
                 .filter(x-> x._2()> minSupportThreshold);
     }
     
-    public JavaPairRDD<String,Float> getDiscriminabilityOfRelations(JavaPairRDD<String,Iterable<Tuple2<String, String>>> relationIndex) {
+    public JavaPairRDD<String,Float> getDiscriminabilityOfRelations(JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex) {
         return relationIndex.mapValues(soIterable -> {
                 int frequencyOfRelation = 0;
-                Set<String> localObjects = new HashSet<>();
-                for (Tuple2<String, String> so : soIterable) {
+                IntOpenHashSet localObjects = new IntOpenHashSet();
+                for (Tuple2<Integer, Integer> so : soIterable) {
                     frequencyOfRelation++;
                     localObjects.add(so._2());
                 }
@@ -127,55 +161,63 @@ public class RelationsRank {
                 .collect();        
     }
     
-    
-    //TODO: remove this method, keeping int entity ids instead of urls
-    public JavaPairRDD<String, Iterable<Tuple2<String, String>>> getRawEntityRelations(JavaRDD<String> rawTriples, List<String> subjects, String SEPARATOR) {
-        return rawTriples.mapToPair(line -> {
-          String[] spo = line.split(SEPARATOR);
-          if (spo.length != 3) {
-              return null;
-          }
-          if (!subjects.contains(spo[2])) { //not a relation
-              return null;
-          }
-          return new Tuple2<>(spo[0], new Tuple2<>(spo[1], spo[2]));
-        })
-        .filter (x -> x != null)
-        .groupByKey();
-    }
-    
-    
-    
     /**
-     * TODO: Make it possible to return JavaPairRDD<Int, IntArrayList>, replacing entity urls with numeric entity ids (same as in blocking)!!!
      * Get the top-K neighbors (the neighbors found for the top-K relations, based on the local ranking of the relations).
-     * @param inputEntities a list of (entityURL, Iterable(attributeName,attributeValue)) pairs
+     * @param relationIndex key: relation, value: (subjectId, objectId)
      * @param relationsRank
      * @param K the K from top-K
+     * @param postiveIds true if entity ids should be positive, false, if they should be reversed (-eId), i.e., if it is dataset1, or dataset 2
      * @return 
      */
-    public JavaPairRDD<String, String[]> getTopNeighborsPerEntity(JavaPairRDD<String, Iterable<Tuple2<String,String>>> inputEntities, List<String> relationsRank, int K) {
-        return inputEntities.mapValues(entityAtts -> {
-            PriorityQueue<CustomRelation> topK = new PriorityQueue<>(K);
-            for (Tuple2<String,String> att : entityAtts) {
-                int relationRank = relationsRank.indexOf(att._1());          
-                if (relationRank == -1) { //then this is not a relation
-                   continue;
-                }  
-                CustomRelation curr = new CustomRelation(att._2(), relationRank);
-                topK.add(curr);
-                if (topK.size() > K) {
-                    topK.poll();
+    public JavaPairRDD<Integer, IntArrayList> getTopNeighborsPerEntity(JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex, List<String> relationsRank, int K, boolean postiveIds) {
+        return relationIndex.flatMapToPair(x-> {
+                List<Tuple2<Integer, Tuple2<String, Integer>>> entities = new ArrayList<>(); //key: subjectId, value: (relation, objectId)
+                for (Tuple2<Integer,Integer> relatedEntities : x._2()) {
+                    if (postiveIds) {
+                        entities.add(new Tuple2<>(relatedEntities._1(), new Tuple2<>(x._1(), relatedEntities._2())));
+                    } else {
+                        entities.add(new Tuple2<>(-relatedEntities._1(), new Tuple2<>(x._1(), -relatedEntities._2())));
+                    }
                 }
+                return entities.iterator();
+            })                   
+            .combineByKey( //should be faster than groupByKey (keeps local top-Ks before shuffling, like a combiner in MapReduce)
+            //createCombiner
+            relation -> {
+                PriorityQueue<CustomRelation> initial = new PriorityQueue<>(K);
+                int relationRank = relationsRank.indexOf(relation ._1());
+                initial.add(new CustomRelation(relation ._2(), relationRank));
+                return initial; 
             }
-            
-            String[] result = new String[topK.size()];
+            //mergeValue
+            , (PriorityQueue<CustomRelation> pq, Tuple2<String,Integer> relation) -> {
+                int relationRank = relationsRank.indexOf(relation._1());
+                pq.add(new CustomRelation(relation._2(), relationRank));                
+                if (pq.size() > K) {
+                    pq.poll();
+                }
+                return pq;
+            }
+            //mergeCombiners
+            , (PriorityQueue<CustomRelation> pq1, PriorityQueue<CustomRelation> pq2) -> {
+                while (!pq2.isEmpty()) {
+                    CustomRelation c = pq2.poll();
+                    pq1.add(c);
+                    if (pq1.size() > K) {
+                        pq1.poll();
+                    }
+                }
+                return pq1;
+            }
+        ).mapValues(topK -> { //just reverse the order of candidates and transform values to IntArrayList (topK are kept already)      
+            IntArrayList result = new IntArrayList(topK.size());            
             int i = 0;
-            while (!topK.isEmpty()) {
-                result[i++] = topK.poll().getString();
+            while (!topK.isEmpty()) {                
+                result.add(i++, topK.poll().getEntityId());
             }
-            return result;            
+            return result;
         });
+       
     }
     
     
@@ -203,7 +245,7 @@ public class RelationsRank {
             try {                                
                 Utils.deleteHDFSPath(outputPath);
             } catch (IOException | URISyntaxException ex) {
-                Logger.getLogger(BlockFiltering.class.getName()).log(Level.SEVERE, null, ex);
+                Logger.getLogger(RelationsRank.class.getName()).log(Level.SEVERE, null, ex);
             }
         }
                        
@@ -231,32 +273,14 @@ public class RelationsRank {
         
         final String SEPARATOR = " ";
         final float MIN_SUPPORT_THRESHOLD = 0.01f;
-        final int K = 3;
+        final int N = 3;
         
-        RelationsRank rr = new RelationsRank();
         JavaRDD<String> rawTriples1 = jsc.textFile(inputPath1);
         JavaRDD<String> rawTriples2 = jsc.textFile(inputPath2);
         
-        rawTriples1.persist(StorageLevel.MEMORY_AND_DISK_SER());
-        rawTriples2.persist(StorageLevel.MEMORY_AND_DISK_SER());
-        
-        List<String> relationsRank1 = rr.run(rawTriples1, SEPARATOR, MIN_SUPPORT_THRESHOLD);
-        List<String> relationsRank2 = rr.run(rawTriples2, SEPARATOR, MIN_SUPPORT_THRESHOLD);
-        
-        
-        List<String> subjects1 = null; //a list of (distinct) subject URLs, keeping insertion order (from original triples file)
-        List<String> subjects2 = null; //a list of (distinct) subject URLs, keeping insertion order (from original triples file)
-        
-        JavaPairRDD<String, Iterable<Tuple2<String,String>>> rawEntityRelations1 = rr.getRawEntityRelations(rawTriples1, subjects1, SEPARATOR);
-        JavaPairRDD<String, Iterable<Tuple2<String,String>>> rawEntityRelations2 = rr.getRawEntityRelations(rawTriples2, subjects2, SEPARATOR);
-        
-        
-        //TODO: convert  the following results to JavaPairRDD<Integer, IntArrayList>, giving the same entity ids that blocking uses
-        JavaPairRDD<String, String[]> topNeighbors1 = rr.getTopNeighborsPerEntity(rawEntityRelations1, relationsRank1, K);
-        JavaPairRDD<String, String[]> topNeighbors2 = rr.getTopNeighborsPerEntity(rawEntityRelations2, relationsRank2, K);
-        
-        
-        //TODO: for each entity pair whose top-neighbors share a common block, neighborSim = max value_sim of outNeighbors
+        RelationsRank rr = new RelationsRank();
+        Map<Integer, IntArrayList> topNeighbors1 = rr.run(rawTriples1, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, true);
+        Map<Integer, IntArrayList> topNeighbors2 = rr.run(rawTriples2, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, false);
         
     }
 
@@ -267,11 +291,11 @@ public class RelationsRank {
  */
 private static class CustomRelation implements Comparable<CustomRelation>, Serializable {
     // public final fields ok for this small example
-    public final String string;
+    public final int entityId;
     public double value;
 
-    public CustomRelation(String string, double value) {
-        this.string = string;
+    public CustomRelation(int entityId, double value) {
+        this.entityId = entityId;
         this.value = value;
     }
 
@@ -281,8 +305,8 @@ private static class CustomRelation implements Comparable<CustomRelation>, Seria
         return Double.compare(value, other.value); 
     }
     
-    public String getString(){
-        return string;
+    public int getEntityId(){
+        return entityId;
     }
     
     public void setValue(double value) {
@@ -291,7 +315,7 @@ private static class CustomRelation implements Comparable<CustomRelation>, Seria
     
     @Override
     public String toString() {
-        return string+":"+value;
+        return entityId+":"+value;
     }
 }    
     

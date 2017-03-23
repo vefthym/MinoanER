@@ -16,21 +16,21 @@
 
 package metablockingspark.workflow;
 
+import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
 import java.io.IOException;
 import java.net.URISyntaxException;
-import java.util.Arrays;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import metablockingspark.entityBased.EntityBasedCNPCBSCompressed;
-import metablockingspark.entityBased.EntityBasedCNPCBSUncompressed;
+import metablockingspark.entityBased.EntityBasedCNPInMemory;
 import metablockingspark.preprocessing.BlockFiltering;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
-import metablockingspark.utils.MyKryoRegistrator;
+import metablockingspark.preprocessing.EntityWeightsWJS;
 import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.storage.StorageLevel;
 import org.apache.spark.util.LongAccumulator;
@@ -39,7 +39,7 @@ import org.apache.spark.util.LongAccumulator;
  *
  * @author vefthym
  */
-public class FullMetaBlockingWorkflowCBS {
+public class MetaBlockingOnlyValues {
     
     
     
@@ -57,7 +57,7 @@ public class FullMetaBlockingWorkflowCBS {
             inputPath = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testInput";            
             outputPath = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testOutput";            
         } else {            
-            tmpPath = "/file:/tmp/";
+            tmpPath = "/file:/tmp";
             //master = "spark://master:7077";
             inputPath = args[0];            
             outputPath = args[1];
@@ -68,11 +68,11 @@ public class FullMetaBlockingWorkflowCBS {
                 Logger.getLogger(BlockFiltering.class.getName()).log(Level.SEVERE, null, ex);
             }
         }
-        
-        final int NUM_CORES_IN_CLUSTER = 128;
+                       
+        final int NUM_CORES_IN_CLUSTER = 128; //128 in ISL cluster, 28 in okeanos cluster
                        
         SparkSession spark = SparkSession.builder()
-            .appName("MetaBlocking CBS on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1)) 
+            .appName("MetaBlocking WJS only values on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1)) 
             .config("spark.sql.warehouse.dir", tmpPath)
             .config("spark.eventLog.enabled", true)
             .config("spark.default.parallelism", NUM_CORES_IN_CLUSTER * 4) //x tasks for each core (128 cores) --> x "reduce" rounds
@@ -81,11 +81,9 @@ public class FullMetaBlockingWorkflowCBS {
             //memory configurations (deprecated)            
             .config("spark.memory.useLegacyMode", true)
             .config("spark.shuffle.memoryFraction", 0.4)
-            .config("spark.storage.memoryFraction", 0.4) 
-                
+            .config("spark.storage.memoryFraction", 0.4)                
             .config("spark.memory.offHeap.enabled", true)
-            .config("spark.memory.offHeap.size", "10g")
-            
+            .config("spark.memory.offHeap.size", "10g")            
             
             //un-comment the following for Kryo serializer (does not seem to improve compression, only speed)            
             /*
@@ -93,15 +91,10 @@ public class FullMetaBlockingWorkflowCBS {
             .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
             .config("spark.kryo.registrationRequired", true) //just to be safe that everything is serialized as it should be (otherwise runtime error)
             */
-            
-            //.master(master)
             .getOrCreate();        
-        
-        
         
         JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());        
         LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();
-        
         
         
         ////////////////////////
@@ -129,7 +122,15 @@ public class FullMetaBlockingWorkflowCBS {
         JavaPairRDD<Integer, IntArrayList> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
         blocksFromEI.persist(StorageLevel.DISK_ONLY());
         
-        blocksFromEI.count(); //the simplest action just to run blocksFromEI and get the actual value for the counters below
+        
+        //get the total weights of each entity, required by WJS weigthing scheme (only)
+        System.out.println("\n\nStarting EntityWeightsWJS...");
+        EntityWeightsWJS wjsWeights = new EntityWeightsWJS();        
+        Int2FloatOpenHashMap totalWeights = new Int2FloatOpenHashMap(); //saves memory by storing data as primitive types        
+        wjsWeights.getWeights(blocksFromEI, entityIndex).foreach(entry -> {
+            totalWeights.put(entry._1().intValue(), entry._2().floatValue());
+        });
+        Broadcast<Int2FloatOpenHashMap> totalWeights_BV = jsc.broadcast(totalWeights);
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
         final int K = ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
@@ -141,14 +142,20 @@ public class FullMetaBlockingWorkflowCBS {
         
         entityIndex.unpersist();
         
+        long numNegativeEntities = wjsWeights.getNumNegativeEntities();
+        long numPositiveEntities = wjsWeights.getNumPositiveEntities();
+        
+        System.out.println("Found "+numNegativeEntities+" negative entities");
+        System.out.println("Found "+numPositiveEntities+" positive entities");
+        
         //CNP
         System.out.println("\n\nStarting CNP...");
-        //EntityBasedCNPCBSCompressed cnp = new EntityBasedCNPCBSCompressed(); //biggger shuffle size than usign Java Serializer without Hadoop Writables
-        EntityBasedCNPCBSUncompressed cnp = new EntityBasedCNPCBSUncompressed();
-        JavaPairRDD<Integer,Integer[]> metablockingResults = cnp.run(blocksFromEI, K);
+        EntityBasedCNPInMemory cnp = new EntityBasedCNPInMemory();
+        //EntityBasedCNP cnp = new EntityBasedCNP();
+        JavaPairRDD<Integer,IntArrayList> metablockingResults = cnp.run(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
         
         metablockingResults
-                .mapValues(x -> Arrays.toString(x)).saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)
+                .mapValues(x -> x.toString()).saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)
         System.out.println("Job finished successfully. Output written in "+outputPath);
     }
     
