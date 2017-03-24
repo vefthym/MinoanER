@@ -28,6 +28,7 @@ import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
+import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
 import scala.Serializable;
 import scala.Tuple2;
@@ -45,12 +46,15 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
             String SEPARATOR, 
             float MIN_SUPPORT_THRESHOLD,
             int K,
-            int N) {
+            int N, 
+            JavaSparkContext jsc) {
         
-        Map<Integer,IntArrayList> inNeighbors = new HashMap<>(new RelationsRank().run(rawTriples1, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, true));
-        inNeighbors.putAll(new RelationsRank().run(rawTriples2, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, false));
+        Map<Integer,IntArrayList> inNeighbors = new HashMap<>(new RelationsRank().run(rawTriples1, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, true, jsc));
+        inNeighbors.putAll(new RelationsRank().run(rawTriples2, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, false, jsc));
         
-        JavaPairRDD<Tuple2<Integer, Integer>, Float> neighborSims = getNeighborSims(topKvalueCandidates, inNeighbors);
+        Broadcast<Map<Integer,IntArrayList>> inNeighbors_BV = jsc.broadcast(inNeighbors);
+        
+        JavaPairRDD<Tuple2<Integer, Integer>, Float> neighborSims = getNeighborSims(topKvalueCandidates, inNeighbors_BV);
         
         JavaPairRDD<Integer, IntArrayList> topKneighborCandidates =  getTopKNeighborSims(neighborSims, K);        
         return topKneighborCandidates;
@@ -68,11 +72,6 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
      * @return key: an entityId, value: a list of pairs of candidate matches along with their value_sim with the key
      */
     public JavaPairRDD<Integer,Int2FloatOpenHashMap> getTopKValueSims(JavaPairRDD<Integer, IntArrayList> blocksFromEI, Broadcast<Int2FloatOpenHashMap> totalWeightsBV, int K, long numNegativeEntities, long numPositiveEntities) {
-        
-        Int2FloatOpenHashMap totalWeights = totalWeightsBV.value(); //saves memory by storing data as primitive types                
-        totalWeightsBV.unpersist();
-        totalWeightsBV.destroy();
-        
         JavaPairRDD<Integer, IntArrayList> mapOutput = EntityBasedCNPMapPhase.getMapOutput(blocksFromEI);
                
         //reduce phase
@@ -97,9 +96,9 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
                                         
                     //calculate the weight of each edge in the blocking graph (i.e., for each candidate match)
                     Map<Integer, Float> weights = new HashMap<>();
-                    float entityWeight = totalWeights.get(entityId.intValue());
+                    float entityWeight = totalWeightsBV.value().get(entityId.intValue());
                     for (int neighborId : counters.keySet()) {
-			float currentWeight = counters.get(neighborId) / (Float.MIN_NORMAL + entityWeight + totalWeights.get(neighborId));
+			float currentWeight = counters.get(neighborId) / (Float.MIN_NORMAL + entityWeight + totalWeightsBV.value().get(neighborId));
 			weights.put(neighborId, currentWeight);			
                     }
                     
@@ -122,16 +121,19 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
     /**
      * Returns the neighborSim of each entity pair. 
      * @param valueSims an RDD with the top-K value sims for each entity, in the form key: eid, value: (candidateMatch cId, value_sim(eId,cId))
-     * @param inNeighbors a Map with the top in-neighbors of each entity (the reverse of top-3 out-Neighbors). Possible cause of OutOfMemory error (try to make as compact as possible)
+     * @param inNeighbors_BV a Map with the top in-neighbors of each entity (the reverse of top-3 out-Neighbors). Possible cause of OutOfMemory error (try to make as compact as possible)
      * @return the neighborSim of each entity pair, where entity pair is the key and neighborSim is the value
      */
-    public JavaPairRDD<Tuple2<Integer, Integer>, Float> getNeighborSims(JavaPairRDD<Integer,Int2FloatOpenHashMap> valueSims, Map<Integer,IntArrayList> inNeighbors) {
-        
-       return valueSims.flatMapToPair(x->{
+    public JavaPairRDD<Tuple2<Integer, Integer>, Float> getNeighborSims(JavaPairRDD<Integer,Int2FloatOpenHashMap> valueSims, Broadcast<Map<Integer,IntArrayList>> inNeighbors_BV) {
+       
+        JavaPairRDD<Tuple2<Integer,Integer>, Float> partialNeighborSimsRDD = valueSims.flatMapToPair(x->{
             int eId = x._1();
-            IntArrayList eInNeighbors = inNeighbors.get(eId);
+            IntArrayList eInNeighbors = inNeighbors_BV.value().get(eId);
             
             List<Tuple2<Tuple2<Integer,Integer>, Float>> partialNeighborSims = new ArrayList<>(); //key: (negativeEid, positiveEid), value: valueSim(outNeighbor(nEid),outNeighbor(pEid))
+            if (eInNeighbors == null) {
+                return partialNeighborSims.iterator();
+            }
             for (Map.Entry<Integer, Float> eIdValueCandidates : x._2().entrySet()) {
                 for (Integer eInNeighbor : eInNeighbors) {
                     if (eId < 0) 
@@ -142,7 +144,12 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
             }
             
             return partialNeighborSims.iterator();
-        })
+        });
+       
+        inNeighbors_BV.unpersist();
+        inNeighbors_BV.destroy();
+        
+        return partialNeighborSimsRDD
         .reduceByKey((w1, w2) -> Math.max(w1, w2)); //for each entity pair, neighborSim = max value sim of its pairs of out-neighbors        
     }
     

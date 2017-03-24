@@ -16,6 +16,7 @@
 
 package metablockingspark.utils;
 
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -71,5 +72,27 @@ public class Utils {
                 .map(line -> line.split(SEPARATOR)[0])
                 .collect())
                 ); //convert list to set (to remove duplicates) and back to list (to have index of each element)
+    }
+    
+    /**
+     * Maps an entity url to its entity id, that is also used by blocking.
+     * @param rawTriples
+     * @param SEPARATOR
+     * @return a map from an entity url to its entity id, that is also used by blocking.
+     */
+    public static Object2IntOpenHashMap<String> getEntityIdsMapping(JavaRDD<String> rawTriples, String SEPARATOR) {        
+        LinkedHashSet<String> subjectsSet =                  
+            new LinkedHashSet<>(rawTriples
+            .map(line -> line.split(SEPARATOR)[0])
+            .collect()                
+            ); //convert list to set (to remove duplicates)
+        
+        Object2IntOpenHashMap<String> result = new Object2IntOpenHashMap<>(subjectsSet.size());
+        result.defaultReturnValue(-1);
+        int index = 0;
+        for (String subject : subjectsSet) {
+            result.put(subject, index++);
+        }
+        return result;
     }
 }

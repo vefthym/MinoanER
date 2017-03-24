@@ -17,6 +17,7 @@ package metablockingspark.relationsWeighting;
 
 import com.google.common.collect.Ordering;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import java.io.IOException;
 import java.io.Serializable;
 import java.net.URISyntaxException;
@@ -31,6 +32,7 @@ import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.storage.StorageLevel;
 import scala.Tuple2;
@@ -50,18 +52,26 @@ public class RelationsRank {
      * @param positiveIds
      * @return 
      */
-    public Map<Integer,IntArrayList> run(JavaRDD<String> rawTriples, String SEPARATOR, float MIN_SUPPORT_THRESHOLD, int N, boolean positiveIds) {
+    public Map<Integer,IntArrayList> run(JavaRDD<String> rawTriples, String SEPARATOR, float MIN_SUPPORT_THRESHOLD, int N, boolean positiveIds, JavaSparkContext jsc) {
         rawTriples.persist(StorageLevel.MEMORY_AND_DISK_SER());        
         
-        List<String> subjects = Utils.getEntityUrlsFromEntityRDDInOrder(rawTriples, SEPARATOR); //a list of (distinct) subject URLs, keeping insertion order (from original triples file)
+        //List<String> subjects = Utils.getEntityUrlsFromEntityRDDInOrder(rawTriples, SEPARATOR); //a list of (distinct) subject URLs, keeping insertion order (from original triples file)
+        Object2IntOpenHashMap<String> subjects = Utils.getEntityIdsMapping(rawTriples, SEPARATOR);
         System.out.println("Found "+subjects.size()+" entities in collection "+ (positiveIds?"1":"2"));
-                
-        JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex = getRelationIndex(rawTriples, SEPARATOR, subjects);        
+        
+        long numEntitiesSquared = (long)subjects.keySet().size();
+        
+        Broadcast<Object2IntOpenHashMap<String>> subjects_BV = jsc.broadcast(subjects);
+        
+        JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex = getRelationIndex(rawTriples, SEPARATOR, subjects_BV);        
         
         rawTriples.unpersist();        
         relationIndex.persist(StorageLevel.MEMORY_AND_DISK_SER());        
+        
+        
+        numEntitiesSquared *= numEntitiesSquared;
                         
-        List<String> relationsRank = getRelationsRank(relationIndex, MIN_SUPPORT_THRESHOLD, subjects);
+        List<String> relationsRank = getRelationsRank(relationIndex, MIN_SUPPORT_THRESHOLD, numEntitiesSquared);
         
         Map<Integer, IntArrayList> topNeighbors = getTopNeighborsPerEntity(relationIndex, relationsRank, N, positiveIds).collectAsMap();        
         
@@ -76,11 +86,11 @@ public class RelationsRank {
      * Returns a list of relations sorted in descending score.      
      * @param relationIndex
      * @param minSupportThreshold the minimum support threshold allowed, used for filtering relations with lower support
-     * @param subjects a list of subjects in the same order as the entity ids used in blocking
+     * @param numEntitiesSquared
      * @return a list of relations sorted in descending score.
      */
-    public List<String> getRelationsRank(JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex, float minSupportThreshold, List<String> subjects) {                        
-        JavaPairRDD<String,Float> supports = getSupportOfRelations(relationIndex, (long)subjects.size() * subjects.size(), minSupportThreshold);
+    public List<String> getRelationsRank(JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex, float minSupportThreshold, long numEntitiesSquared) {                        
+        JavaPairRDD<String,Float> supports = getSupportOfRelations(relationIndex, numEntitiesSquared, minSupportThreshold);
         JavaPairRDD<String,Float> discrims = getDiscriminabilityOfRelations(relationIndex);
         
         return getSortedRelations(supports, discrims);
@@ -99,8 +109,8 @@ public class RelationsRank {
           if (spo.length != 3) {
               return null;
           }
-          Integer subjectId = subjects.indexOf(spo[0]); //replace subject url with entity id (subjects belongs to subjects by default)
-          Integer objectId = subjects.indexOf(spo[2]); //-1 if the object is not an entity, otherwise the entityId          
+          Integer subjectId = subjects.indexOf(spo[0]); //replace subject url with entity id (subjects belongs to subjects by default) //TODO: too slow
+          Integer objectId = subjects.indexOf(spo[2]); //-1 if the object is not an entity, otherwise the entityId      //TODO: too slow!     
           return new Tuple2<>(spo[1], new Tuple2<>(subjectId, objectId)); //relation, (subjectId, objectId)
         })
         .filter(x -> x!= null)
@@ -127,12 +137,61 @@ public class RelationsRank {
         });        
     }
     
+    /**
+     * Returns a relation index of the form: key: relationString, value: list of (subjectId, objectId) linked by this relation.
+     * @param rawTriples
+     * @param SEPARATOR
+     * @param subjects_BV
+     * @return a relation index of the form: key: relationString, value: list of (subjectId, objectId) linked by this relation
+     */
+    public JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> getRelationIndex(JavaRDD<String> rawTriples, String SEPARATOR, Broadcast<Object2IntOpenHashMap<String>> subjects_BV) {        
+        JavaPairRDD<String,Tuple2<Integer,Integer>> rawRelationsRDD = rawTriples
+        .repartition(512)
+        .mapToPair(line -> {
+          String[] spo = line.replaceAll(" \\.$", "").split(SEPARATOR);
+          if (spo.length != 3) {
+              return null;
+          }
+          int subjectId = subjects_BV.value().getInt(spo[0]); //replace subject url with entity id (subjects belongs to subjects by default)
+          int objectId = subjects_BV.value().getInt(spo[2]); //-1 if the object is not an entity, otherwise the entityId      
+          return new Tuple2<>(spo[1], new Tuple2<>(subjectId, objectId)); //relation, (subjectId, objectId)
+        })
+        .setName("rawRelationsRDD")
+        .filter(x -> x!= null);
+        
+        subjects_BV.unpersist();
+        subjects_BV.destroy();
+        
+        return rawRelationsRDD.groupByKey()       
+        .filter(x -> {
+            int relationCount = 0;
+            int numInstances = 0;
+            for (Tuple2<Integer,Integer> so : x._2()) {
+                numInstances++;
+                if (so._2() != -1) {
+                    relationCount++;
+                }
+            }
+            return relationCount > (numInstances-relationCount); //majority voting (is this property used more as a relation or as a datatype property?
+        })
+        .mapValues(x -> {
+            List<Tuple2<Integer,Integer>> relationsOnly = new ArrayList<>();
+            for (Tuple2<Integer,Integer> so : x) {                
+                if (so._2() != -1) {
+                    relationsOnly.add(new Tuple2<>(so._1(), so._2()));
+                } 
+            }
+            return relationsOnly;
+        });        
+    }
+    
     public JavaPairRDD<String,Float> getSupportOfRelations(JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex, long numEntititiesSquared, float minSupportThreshold) {
         JavaPairRDD<String, Float> unnormalizedSupports = relationIndex
                 .mapValues(so -> (float) so.spliterator().getExactSizeIfKnown() / numEntititiesSquared);
+        unnormalizedSupports.setName("unnormalizedSupports");
         unnormalizedSupports.cache();
         
-        System.out.println(unnormalizedSupports.count()+" relations have been assigned a support value"); // dummy action);
+        System.out.println(unnormalizedSupports.count()+" relations have been assigned a support value"); // dummy action
         float max_support = unnormalizedSupports.values().max(Ordering.natural());
         return unnormalizedSupports
                 .mapValues(x-> x/max_support)
@@ -279,8 +338,8 @@ public class RelationsRank {
         JavaRDD<String> rawTriples2 = jsc.textFile(inputPath2);
         
         RelationsRank rr = new RelationsRank();
-        Map<Integer, IntArrayList> topNeighbors1 = rr.run(rawTriples1, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, true);
-        Map<Integer, IntArrayList> topNeighbors2 = rr.run(rawTriples2, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, false);
+        Map<Integer, IntArrayList> topNeighbors1 = rr.run(rawTriples1, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, true, jsc);
+        Map<Integer, IntArrayList> topNeighbors2 = rr.run(rawTriples2, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, false, jsc);
         
     }
 

@@ -81,21 +81,32 @@ public class FullMetaBlockingWorkflow {
             return;
         }
                        
-        final int NUM_CORES_IN_CLUSTER = 128; //128 in ISL cluster, 28 in okeanos cluster
+        final int NUM_CORES_IN_CLUSTER = 120; //120 in ISL cluster, 28 in okeanos cluster
+        final int NUM_WORKERS = 4;
+        final int NUM_EXECUTORS = NUM_WORKERS * 3;
                        
         SparkSession spark = SparkSession.builder()
             .appName("FullMetaBlocking WJS on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1)) 
             .config("spark.sql.warehouse.dir", tmpPath)
             .config("spark.eventLog.enabled", true)
-            .config("spark.default.parallelism", NUM_CORES_IN_CLUSTER * 4) //x tasks for each core (128 cores) --> x "reduce" rounds
+            .config("spark.default.parallelism", NUM_CORES_IN_CLUSTER * 4) //x tasks for each core --> x "reduce" rounds
             .config("spark.rdd.compress", true)
+            .config("spark.network.timeout", "600s")
+                
+            .config("spark.executor.instances", NUM_EXECUTORS)
+            .config("spark.executor.cores", NUM_CORES_IN_CLUSTER/NUM_EXECUTORS)
+            .config("spark.executor.memory", "70G") //not working
+            .config("spark.driver.memory", "10g") //not working
             
             //memory configurations (deprecated)            
             .config("spark.memory.useLegacyMode", true)
-            .config("spark.shuffle.memoryFraction", 0.4)
-            .config("spark.storage.memoryFraction", 0.4)                
+            .config("spark.shuffle.memoryFraction", 0.6)
+            .config("spark.storage.memoryFraction", 0.2) 
+            .config("spark.memory.fraction", 0.8)
             .config("spark.memory.offHeap.enabled", true)
-            .config("spark.memory.offHeap.size", "10g")            
+            .config("spark.memory.offHeap.size", "10g")
+            
+            .config("spark.driver.maxResultSize", "2g")
             
             //un-comment the following for Kryo serializer (does not seem to improve compression, only speed)            
             /*
@@ -118,6 +129,7 @@ public class FullMetaBlockingWorkflow {
         
         BlockFilteringAdvanced bf = new BlockFilteringAdvanced();
         JavaPairRDD<Integer,IntArrayList> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
+        entityIndex.setName("entityIndex");
         entityIndex.cache();
         //entityIndex.persist(StorageLevel.DISK_ONLY_2()); //store to disk with replication factor 2
         
@@ -132,6 +144,7 @@ public class FullMetaBlockingWorkflow {
         
         BlocksFromEntityIndex bFromEI = new BlocksFromEntityIndex();
         JavaPairRDD<Integer, IntArrayList> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
+        blocksFromEI.setName("blocksFromEI");
         blocksFromEI.persist(StorageLevel.DISK_ONLY());
         
         
@@ -142,7 +155,7 @@ public class FullMetaBlockingWorkflow {
         wjsWeights.getWeights(blocksFromEI, entityIndex).foreach(entry -> {
             totalWeights.put(entry._1().intValue(), entry._2().floatValue());
         });
-        Broadcast<Int2FloatOpenHashMap> totalWeights_BV = jsc.broadcast(totalWeights);
+        Broadcast<Int2FloatOpenHashMap> totalWeights_BV = jsc.broadcast(totalWeights);        
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
         final int K = ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
@@ -171,10 +184,14 @@ public class FullMetaBlockingWorkflow {
         
         System.out.println("Getting the top K value candidates...");
         EntityBasedCNPNeighborsInMemory cnp = new EntityBasedCNPNeighborsInMemory();        
-        JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);        
+        JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
+        totalWeights_BV.unpersist();
+        totalWeights_BV.destroy();
+        
+        blocksFromEI.unpersist();
         
         System.out.println("Getting the top K neighbor candidates...");
-        JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates = cnp.run(topKValueCandidates, jsc.textFile(inputTriples1), jsc.textFile(inputTriples2), SEPARATOR, MIN_SUPPORT_THRESHOLD, K, N);
+        JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates = cnp.run(topKValueCandidates, jsc.textFile(inputTriples1), jsc.textFile(inputTriples2), SEPARATOR, MIN_SUPPORT_THRESHOLD, K, N, jsc);
         
         System.out.println("Writing results to HDFS...");
         topKNeighborCandidates
