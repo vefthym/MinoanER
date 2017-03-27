@@ -81,31 +81,33 @@ public class FullMetaBlockingWorkflow {
             return;
         }
                        
-        final int NUM_CORES_IN_CLUSTER = 120; //120 in ISL cluster, 28 in okeanos cluster
-        final int NUM_WORKERS = 4;
+        final int NUM_CORES_IN_CLUSTER = 152; //152 in ISL cluster, 28 in okeanos cluster
+        final int NUM_WORKERS = 4; //4 in ISL cluster, 14 in okeanos cluster
         final int NUM_EXECUTORS = NUM_WORKERS * 3;
+        final int PARALLELISM = NUM_CORES_IN_CLUSTER * 2; //spark tuning documentation suggests 2 or 3, unless OOM error (in that case more)
                        
         SparkSession spark = SparkSession.builder()
             .appName("FullMetaBlocking WJS on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1)) 
             .config("spark.sql.warehouse.dir", tmpPath)
             .config("spark.eventLog.enabled", true)
-            .config("spark.default.parallelism", NUM_CORES_IN_CLUSTER * 4) //x tasks for each core --> x "reduce" rounds
+            .config("spark.default.parallelism", PARALLELISM) //x tasks for each core --> x "reduce" rounds
             .config("spark.rdd.compress", true)
             .config("spark.network.timeout", "600s")
+            .config("spark.executor.heartbeatInterval", "20s")    
                 
             .config("spark.executor.instances", NUM_EXECUTORS)
             .config("spark.executor.cores", NUM_CORES_IN_CLUSTER/NUM_EXECUTORS)
             .config("spark.executor.memory", "70G") //not working
             .config("spark.driver.memory", "10g") //not working
             
-            //memory configurations (deprecated)            
+            //memory configurations (deprecated)                        
             .config("spark.memory.useLegacyMode", true)
             .config("spark.shuffle.memoryFraction", 0.6)
             .config("spark.storage.memoryFraction", 0.2) 
             .config("spark.memory.fraction", 0.8)
             .config("spark.memory.offHeap.enabled", true)
             .config("spark.memory.offHeap.size", "10g")
-            
+                
             .config("spark.driver.maxResultSize", "2g")
             
             //un-comment the following for Kryo serializer (does not seem to improve compression, only speed)            
@@ -185,13 +187,13 @@ public class FullMetaBlockingWorkflow {
         System.out.println("Getting the top K value candidates...");
         EntityBasedCNPNeighborsInMemory cnp = new EntityBasedCNPNeighborsInMemory();        
         JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
-        totalWeights_BV.unpersist();
-        totalWeights_BV.destroy();
+        //totalWeights_BV.unpersist();
+        //totalWeights_BV.destroy();
         
-        blocksFromEI.unpersist();
+        //blocksFromEI.unpersist();
         
         System.out.println("Getting the top K neighbor candidates...");
-        JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates = cnp.run(topKValueCandidates, jsc.textFile(inputTriples1), jsc.textFile(inputTriples2), SEPARATOR, MIN_SUPPORT_THRESHOLD, K, N, jsc);
+        JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates = cnp.run(topKValueCandidates, jsc.textFile(inputTriples1), jsc.textFile(inputTriples2), SEPARATOR, MIN_SUPPORT_THRESHOLD, K, N, jsc, PARALLELISM);
         
         System.out.println("Writing results to HDFS...");
         topKNeighborCandidates

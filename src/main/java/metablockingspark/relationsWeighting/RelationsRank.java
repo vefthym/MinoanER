@@ -52,10 +52,10 @@ public class RelationsRank {
      * @param positiveIds
      * @return 
      */
-    public Map<Integer,IntArrayList> run(JavaRDD<String> rawTriples, String SEPARATOR, float MIN_SUPPORT_THRESHOLD, int N, boolean positiveIds, JavaSparkContext jsc) {
+    public Map<Integer,IntArrayList> run(JavaRDD<String> rawTriples, String SEPARATOR, float MIN_SUPPORT_THRESHOLD, int N, boolean positiveIds, JavaSparkContext jsc, int PARALLELISM) {
         rawTriples.persist(StorageLevel.MEMORY_AND_DISK_SER());        
         
-        //List<String> subjects = Utils.getEntityUrlsFromEntityRDDInOrder(rawTriples, SEPARATOR); //a list of (distinct) subject URLs, keeping insertion order (from original triples file)
+        //List<String> subjects = Utils.getEntityUrlsFromEntityRDDInOrder(rawTriples, SEPARATOR); //a list of (distinct) subject URLs, keeping insertion order (from original triples file)        
         Object2IntOpenHashMap<String> subjects = Utils.getEntityIdsMapping(rawTriples, SEPARATOR);
         System.out.println("Found "+subjects.size()+" entities in collection "+ (positiveIds?"1":"2"));
         
@@ -63,7 +63,7 @@ public class RelationsRank {
         
         Broadcast<Object2IntOpenHashMap<String>> subjects_BV = jsc.broadcast(subjects);
         
-        JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex = getRelationIndex(rawTriples, SEPARATOR, subjects_BV);        
+        JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex = getRelationIndex(rawTriples, SEPARATOR, subjects_BV, PARALLELISM);        
         
         rawTriples.unpersist();        
         relationIndex.persist(StorageLevel.MEMORY_AND_DISK_SER());        
@@ -144,9 +144,9 @@ public class RelationsRank {
      * @param subjects_BV
      * @return a relation index of the form: key: relationString, value: list of (subjectId, objectId) linked by this relation
      */
-    public JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> getRelationIndex(JavaRDD<String> rawTriples, String SEPARATOR, Broadcast<Object2IntOpenHashMap<String>> subjects_BV) {        
+    public JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> getRelationIndex(JavaRDD<String> rawTriples, String SEPARATOR, Broadcast<Object2IntOpenHashMap<String>> subjects_BV, int PARALLELISM) {        
         JavaPairRDD<String,Tuple2<Integer,Integer>> rawRelationsRDD = rawTriples
-        .repartition(512)
+        .repartition(PARALLELISM)
         .mapToPair(line -> {
           String[] spo = line.replaceAll(" \\.$", "").split(SEPARATOR);
           if (spo.length != 3) {
@@ -159,8 +159,8 @@ public class RelationsRank {
         .setName("rawRelationsRDD")
         .filter(x -> x!= null);
         
-        subjects_BV.unpersist();
-        subjects_BV.destroy();
+        //subjects_BV.unpersist();
+        //subjects_BV.destroy();
         
         return rawRelationsRDD.groupByKey()       
         .filter(x -> {
@@ -333,13 +333,14 @@ public class RelationsRank {
         final String SEPARATOR = " ";
         final float MIN_SUPPORT_THRESHOLD = 0.01f;
         final int N = 3;
+        final int PARALLELISM = 152;
         
         JavaRDD<String> rawTriples1 = jsc.textFile(inputPath1);
         JavaRDD<String> rawTriples2 = jsc.textFile(inputPath2);
         
         RelationsRank rr = new RelationsRank();
-        Map<Integer, IntArrayList> topNeighbors1 = rr.run(rawTriples1, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, true, jsc);
-        Map<Integer, IntArrayList> topNeighbors2 = rr.run(rawTriples2, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, false, jsc);
+        Map<Integer, IntArrayList> topNeighbors1 = rr.run(rawTriples1, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, true, jsc, PARALLELISM);
+        Map<Integer, IntArrayList> topNeighbors2 = rr.run(rawTriples2, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, false, jsc, PARALLELISM);
         
     }
 
