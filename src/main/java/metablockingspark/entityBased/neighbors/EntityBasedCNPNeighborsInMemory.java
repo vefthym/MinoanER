@@ -30,6 +30,7 @@ import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
+import org.apache.spark.storage.StorageLevel;
 import scala.Serializable;
 import scala.Tuple2;
 
@@ -82,7 +83,7 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
         //reduce phase
         //metaBlockingResults: key: a negative entityId, value: a list of candidate matches (positive entity ids) along with their value_sim with the key
         return mapOutput
-                .groupByKey() //for each entity create an iterable of arrays of candidate matches (one array from each common block)
+                .groupByKey() //for each entity create an iterable of arrays of candidate matches (one array from each common block)                
                 .mapToPair(x -> {
                     Integer entityId = x._1();
                     
@@ -108,7 +109,7 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
                     }
                     
                     //keep the top-K weights
-                    weights = Utils.sortByValue(weights);                                        
+                    weights = Utils.sortByValue(weights, true);                                        
                     Int2FloatOpenHashMap weightsToEmit = new Int2FloatOpenHashMap();                                      
                     int i = 0;
                     for (int neighbor : weights.keySet()) {
@@ -119,7 +120,7 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
                     }
                     
                     return new Tuple2<>(entityId, weightsToEmit);
-                });          
+                });
     }    
     
     
@@ -212,7 +213,7 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
             int eId = x._1();
             IntArrayList eInNeighbors = inNeighbors_BV.value().get(eId);
             
-            List<Tuple2<Integer,CustomCandidate>> partialNeighborSims = new ArrayList<>(); //key: (negativeEid, positiveEid), value: valueSim(outNeighbor(nEid),outNeighbor(pEid))
+            List<Tuple2<Integer,CustomCandidate>> partialNeighborSims = new ArrayList<>(); //key: entityId, value: (candidateId, valueSim(outNeighbor(eId),outNeighbor(cId)) )
             if (eInNeighbors == null) {
                 return partialNeighborSims.iterator(); //empty
             }

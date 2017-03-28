@@ -48,8 +48,7 @@ public class EntityWeightsWJS implements Serializable {
     public JavaPairRDD<Integer, Float> getWeights(JavaPairRDD<Integer, IntArrayList> blocksFromEI, JavaPairRDD<Integer,IntArrayList> entityIndex) {
         JavaRDD<Integer> entityIds = entityIndex.keys().cache();
         
-        System.out.println("Getting blocksFromEI as a Map...");
-        blocksFromEI.persist(StorageLevel.DISK_ONLY());
+        System.out.println("Getting blocksFromEI as a Map...");        
         Map<Integer, Integer> blockSizesMap = blocksFromEI
                 .mapValues(x -> x.size())                
                 .collectAsMap();

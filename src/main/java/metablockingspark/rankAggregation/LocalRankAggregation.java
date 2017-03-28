@@ -45,7 +45,7 @@ public class LocalRankAggregation implements Serializable {
                     for (Map.Entry<Integer, Float> entry : x.entrySet()) {
                        rankedCandidates.put(entry.getKey(), entry.getValue());
                     }                    
-                    return new IntArrayList(Utils.sortByValue(rankedCandidates).keySet());
+                    return new IntArrayList(Utils.sortByValue(rankedCandidates, true).keySet());
                 })
                 .fullOuterJoin(topKNeighborCandidates)
                 .mapValues(x -> top1Borda(x));                
@@ -92,9 +92,8 @@ public class LocalRankAggregation implements Serializable {
             }
         }
         
-        //the following is not needed in case we always prefer the first list (values)
-        //find elements only in list2        
-        /*
+        //the following is not needed in case we always prefer the first list
+        //find elements only in list2
         currScore = maxSize;
         for (int element2 : list2) {
             int score2 = currScore--;
@@ -105,9 +104,6 @@ public class LocalRankAggregation implements Serializable {
                 }
             } //else, this has been already checked            
         }
-        */
-        
-        
         
         return top1._1();        
     }

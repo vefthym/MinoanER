@@ -111,7 +111,7 @@ public class EntityBasedCNP implements Serializable {
             }
 
             //keep the top-K weights
-            weights = Utils.sortByValue(weights);                    
+            weights = Utils.sortByValue(weights, true);                    
             int[] candidateMatchesSorted = new int[Math.min(weights.size(), K)];                    
 
             int i = 0;

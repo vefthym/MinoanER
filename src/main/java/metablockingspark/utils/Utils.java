@@ -51,16 +51,20 @@ public class Utils {
     }
     
     /**
-     * Copied from http://stackoverflow.com/a/2581754/2516301
-     * @param <K>
-     * @param <V>
-     * @param map
-     * @return 
+     * Returns the input map sorted by value in descending or ascending order.
+     * Adapted from http://stackoverflow.com/a/2581754/2516301
+     * @param <K> the key type of the map
+     * @param <V> the value type of the map
+     * @param map the map to be sorted
+     * @param descending sort in descending order?
+     * @return a new map, which is the input map sorted by value in descending or ascending order.
      */
-    public static <K, V extends Comparable<? super V>> Map<K, V> sortByValue(Map<K, V> map) {
+    public static <K, V extends Comparable<? super V>> Map<K, V> sortByValue(Map<K, V> map, boolean descending) {
     return map.entrySet()
               .stream()
-              .sorted(Map.Entry.comparingByValue(Collections.reverseOrder())) //comment out Collections.reverseOrder() to get ascendingOrder
+              .sorted(descending? 
+                       Map.Entry.comparingByValue(Collections.reverseOrder())   //descending
+                      :Map.Entry.comparingByValue())                            //ascending
               .collect(Collectors.toMap(
                 Map.Entry::getKey, 
                 Map.Entry::getValue, 

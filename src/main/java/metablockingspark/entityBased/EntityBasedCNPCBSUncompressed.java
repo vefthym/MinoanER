@@ -54,7 +54,7 @@ public class EntityBasedCNPCBSUncompressed {
                     }
                     
                     //keep the top-K weights
-                    counters = Utils.sortByValue(counters);                    
+                    counters = Utils.sortByValue(counters, true);                    
                     Integer[] candidateMatchesSorted = new Integer[Math.min(counters.size(), K)];                    
                     
                     int i = 0;

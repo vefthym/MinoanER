@@ -83,10 +83,12 @@ public class FullMetaBlockingWorkflow {
             return;
         }
                        
+        //tuning params
         final int NUM_CORES_IN_CLUSTER = 152; //152 in ISL cluster, 28 in okeanos cluster
         final int NUM_WORKERS = 4; //4 in ISL cluster, 14 in okeanos cluster
         final int NUM_EXECUTORS = NUM_WORKERS * 3;
-        final int PARALLELISM = NUM_CORES_IN_CLUSTER * 2; //spark tuning documentation suggests 2 or 3, unless OOM error (in that case more)
+        final int NUM_EXECUTOR_CORES = NUM_CORES_IN_CLUSTER/NUM_EXECUTORS;
+        final int PARALLELISM = NUM_EXECUTORS * NUM_EXECUTOR_CORES * 3; //spark tuning documentation suggests 2 or 3, unless OOM error (in that case more)
                        
         SparkSession spark = SparkSession.builder()
             .appName("FullMetaBlocking WJS on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1)) 
@@ -98,17 +100,17 @@ public class FullMetaBlockingWorkflow {
             .config("spark.executor.heartbeatInterval", "20s")    
                 
             .config("spark.executor.instances", NUM_EXECUTORS)
-            .config("spark.executor.cores", NUM_CORES_IN_CLUSTER/NUM_EXECUTORS)
+            .config("spark.executor.cores", NUM_EXECUTOR_CORES)
             .config("spark.executor.memory", "70G") //not working
             .config("spark.driver.memory", "10g") //not working
             
             //memory configurations (deprecated)                        
             .config("spark.memory.useLegacyMode", true)
-            .config("spark.shuffle.memoryFraction", 0.6)
-            .config("spark.storage.memoryFraction", 0.2) 
+            .config("spark.shuffle.memoryFraction", 0.4)
+            .config("spark.storage.memoryFraction", 0.4) 
             .config("spark.memory.fraction", 0.8)
-            .config("spark.memory.offHeap.enabled", true)
-            .config("spark.memory.offHeap.size", "10g")
+            //.config("spark.memory.offHeap.enabled", true)
+            //.config("spark.memory.offHeap.size", "10g")
                 
             .config("spark.driver.maxResultSize", "2g")
             
@@ -149,7 +151,8 @@ public class FullMetaBlockingWorkflow {
         BlocksFromEntityIndex bFromEI = new BlocksFromEntityIndex();
         JavaPairRDD<Integer, IntArrayList> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
         blocksFromEI.setName("blocksFromEI");
-        blocksFromEI.persist(StorageLevel.DISK_ONLY());
+        //blocksFromEI.persist(StorageLevel.DISK_ONLY());
+        blocksFromEI.cache(); //a few hundreds MBs
         
         
         //get the total weights of each entity, required by WJS weigthing scheme (only)
@@ -193,7 +196,7 @@ public class FullMetaBlockingWorkflow {
         //totalWeights_BV.destroy();
         
         blocksFromEI.unpersist();
-        topKValueCandidates.persist(StorageLevel.DISK_ONLY());
+        topKValueCandidates.setName("topKValueCandidates").persist(StorageLevel.MEMORY_AND_DISK_SER()); //TODO: check without _SER
         
         System.out.println("Getting the top K neighbor candidates...");
         JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates = cnp.run(topKValueCandidates, jsc.textFile(inputTriples1), jsc.textFile(inputTriples2), SEPARATOR, MIN_SUPPORT_THRESHOLD, K, N, jsc, PARALLELISM);
