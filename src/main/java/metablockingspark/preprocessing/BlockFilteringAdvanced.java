@@ -103,7 +103,7 @@ public class BlockFilteringAdvanced {
     private JavaPairRDD<Integer, IntArrayList> getEntityIndex(JavaPairRDD<Integer,Tuple2<Integer,Integer>> entityBlocks,  LongAccumulator BLOCK_ASSIGNMENTS) {        
         System.out.println("Creating the entity index...");
         
-        return entityBlocks.groupByKey()                
+        return entityBlocks.groupByKey()
             .mapValues(blocks -> {               
                 final int MAX_BLOCKS = ((Double)Math.floor(3*blocks.spliterator().getExactSizeIfKnown()/4+1)).intValue(); //|_ 3|Bi|/4+1 _| //preprocessing
                 //sort the tuples by value (inverseUtility)

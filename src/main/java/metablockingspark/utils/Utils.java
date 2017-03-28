@@ -32,6 +32,7 @@ import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighborsInMemory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaRDD;
 
 /**

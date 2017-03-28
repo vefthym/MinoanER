@@ -21,10 +21,12 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import metablocking.matching.ReciprocalMatching;
 import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighborsInMemory;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
 import metablockingspark.preprocessing.EntityWeightsWJS;
+import metablockingspark.rankAggregation.LocalRankAggregation;
 import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
@@ -190,21 +192,23 @@ public class FullMetaBlockingWorkflow {
         //totalWeights_BV.unpersist();
         //totalWeights_BV.destroy();
         
-        //blocksFromEI.unpersist();
+        blocksFromEI.unpersist();
+        topKValueCandidates.persist(StorageLevel.DISK_ONLY());
         
         System.out.println("Getting the top K neighbor candidates...");
         JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates = cnp.run(topKValueCandidates, jsc.textFile(inputTriples1), jsc.textFile(inputTriples2), SEPARATOR, MIN_SUPPORT_THRESHOLD, K, N, jsc, PARALLELISM);
         
-        System.out.println("Writing results to HDFS...");
-        topKNeighborCandidates
-                .mapValues(x -> x.toString()).saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)
-        System.out.println("Job finished successfully. Output written in "+outputPath);
-        
-        //rank aggregation
-        //JavaPairRDD<Integer,Integer> aggregate = topKValueCandidates.join(topKNeighborCandidates). ... ; --> getTop1 candidate per entity (after local borda)
+        //rank aggregation        
+        System.out.println("Starting rank aggregation...");
+        JavaPairRDD<Integer,Integer> aggregates = new LocalRankAggregation().getTopCandidatePerEntity(topKValueCandidates, topKNeighborCandidates);
         
         //reciprocal matching
-        //JavaPairRDD<Integer,Integer> matches = aggregate.map(pair->((-Id,+Id),1)).reduceByKey((x,y)->x+y).filter(pair->pair._2() == 2).keys();
+        System.out.println("Starting reciprocal matching...");
+        JavaPairRDD<Integer,Integer> matches = new ReciprocalMatching().getReciprocalMatches(aggregates);
+        
+        System.out.println("Writing results to HDFS...");
+        matches.saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)
+        System.out.println("Job finished successfully. Output written in "+outputPath);
     }
     
 }

@@ -88,7 +88,7 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
                     
                     //compute the numerators
                     Int2FloatOpenHashMap counters = new Int2FloatOpenHashMap(); //number of common blocks with current entity per candidate match
-                    for(IntArrayList candidates : x._2()) {                       
+                    for(IntArrayList candidates : x._2()) {
                         int numNegativeEntitiesInBlock = (int) candidates.stream().filter(eid -> eid<0).count();        
                         int numPositiveEntitiesInBlock = candidates.size() - numNegativeEntitiesInBlock;
                         float weight1 = (float) Math.log10((double)numNegativeEntities/numNegativeEntitiesInBlock);
@@ -195,9 +195,9 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
             }
         ).mapValues(x -> {      //just reverse the order of candidates and transform values to IntArrayList (topK are kept already)      
             int i = x.size();            
-            IntArrayList candidates = new IntArrayList(x.size());            
+            int[] candidates = new int[i];
             while (!x.isEmpty()) {
-                candidates.add(--i, x.poll().getEntityId()); //get pq elements in reverse (i.e., descending neighbor sim) order
+                candidates[--i] = x.poll().getEntityId(); //get pq elements in reverse (i.e., descending neighbor sim) order
             }
             return new IntArrayList(candidates);
         });
@@ -261,10 +261,10 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
                 return pq1;
             }
         ).mapValues(x -> {      //just reverse the order of candidates and transform values to IntArrayList (topK are kept already)      
-            int i = x.size();            
-            IntArrayList candidates = new IntArrayList(x.size());            
+            int i = x.size();   
+            int[] candidates = new int[i];            
             while (!x.isEmpty()) {
-                candidates.add(--i, x.poll().getEntityId()); //get pq elements in reverse (i.e., descending neighbor sim) order
+                candidates[--i] = x.poll().getEntityId(); //get pq elements in reverse (i.e., descending neighbor sim) order
             }
             return new IntArrayList(candidates);
         });
