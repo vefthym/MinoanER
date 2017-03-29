@@ -27,7 +27,7 @@ public class ReciprocalMatching {
     public JavaPairRDD<Integer,Integer> getReciprocalMatches(JavaPairRDD<Integer,Integer> top1Candidates) {
         return JavaPairRDD.fromJavaRDD(top1Candidates
                 .mapToPair(pair-> {
-                    if (pair._1() <  pair._2()) { //put lower entity first
+                    if (pair._1() <  pair._2()) { //put smaller entity id first
                         return new Tuple2<>(new Tuple2<>(pair._1(), pair._2()),1);
                     }
                     return new Tuple2<>(new Tuple2<>(pair._2(), pair._1()),1);                    

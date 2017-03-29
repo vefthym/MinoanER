@@ -23,6 +23,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import metablocking.matching.ReciprocalMatching;
 import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighborsInMemory;
+import metablockingspark.evaluation.EvaluateMatchingResults;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
 import metablockingspark.preprocessing.EntityWeightsWJS;
@@ -101,14 +102,16 @@ public class FullMetaBlockingWorkflow {
                 
             .config("spark.executor.instances", NUM_EXECUTORS)
             .config("spark.executor.cores", NUM_EXECUTOR_CORES)
-            .config("spark.executor.memory", "70G") //not working
-            .config("spark.driver.memory", "10g") //not working
+            .config("spark.executor.memory", "50G")
+            //.config("spark.driver.memory", "10g") //not working
             
-            //memory configurations (deprecated)                        
+            //memory configurations (deprecated)
+                /*
             .config("spark.memory.useLegacyMode", true)
             .config("spark.shuffle.memoryFraction", 0.4)
             .config("spark.storage.memoryFraction", 0.4) 
             .config("spark.memory.fraction", 0.8)
+                */
             //.config("spark.memory.offHeap.enabled", true)
             //.config("spark.memory.offHeap.size", "10g")
                 
@@ -196,7 +199,7 @@ public class FullMetaBlockingWorkflow {
         //totalWeights_BV.destroy();
         
         blocksFromEI.unpersist();
-        topKValueCandidates.setName("topKValueCandidates").persist(StorageLevel.MEMORY_AND_DISK_SER()); //TODO: check without _SER
+        //topKValueCandidates.setName("topKValueCandidates").persist(StorageLevel.MEMORY_AND_DISK_SER());
         
         System.out.println("Getting the top K neighbor candidates...");
         JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates = cnp.run(topKValueCandidates, jsc.textFile(inputTriples1), jsc.textFile(inputTriples2), SEPARATOR, MIN_SUPPORT_THRESHOLD, K, N, jsc, PARALLELISM);
@@ -209,9 +212,34 @@ public class FullMetaBlockingWorkflow {
         System.out.println("Starting reciprocal matching...");
         JavaPairRDD<Integer,Integer> matches = new ReciprocalMatching().getReciprocalMatches(aggregates);
         
+        //comment-out the following when using evaluation
         System.out.println("Writing results to HDFS...");
-        matches.saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)
+        matches.saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)        
         System.out.println("Job finished successfully. Output written in "+outputPath);
+        
+        /*
+        long numMatches = matches.count(); //only to add an action
+        System.out.println("Job finished successfully. Found "+numMatches+" matches. Now starting the evaluation...");
+        
+        
+        
+        //unpersist all RDDs and destroy all Broadcasts (not sure if needed)
+        totalWeights_BV.unpersist();
+        totalWeights_BV.destroy();
+        
+        //Start the evaluation        
+        LongAccumulator TPs = jsc.sc().longAccumulator("TPs");
+        LongAccumulator FPs = jsc.sc().longAccumulator("FPs");
+        LongAccumulator FNs = jsc.sc().longAccumulator("FNs");
+        EvaluateMatchingResults evaluation = new EvaluateMatchingResults();
+        
+        JavaPairRDD<Integer,Integer> gt = Utils.getGroundTruthIds(jsc.textFile(inputTriples1), jsc.textFile(inputTriples2), SEPARATOR, jsc.textFile("gtPath"), SEPARATOR);
+        evaluation.evaluateResults(matches, gt, TPs, FPs, FNs);
+        System.out.println("Evaluation finished successfully.");
+        evaluation.printResults(TPs.value(), FPs.value(), FNs.value());                
+        */
+        
+        spark.stop();
     }
     
 }

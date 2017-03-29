@@ -33,7 +33,9 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
+import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
+import scala.Tuple2;
 
 /**
  *
@@ -101,5 +103,24 @@ public class Utils {
             result.put(subject, index++);
         }
         return result;
+    }
+    
+    /**
+     * Return the ground truth in an RDD format, each entity represented with an integer entity id. 
+     * @param rawTriples1
+     * @param rawTriples2
+     * @param RAW_TRIPLES_SEPARATOR
+     * @param gt
+     * @param GT_SEPARATOR
+     * @return 
+     */
+    public static JavaPairRDD<Integer,Integer> getGroundTruthIds (JavaRDD<String> rawTriples1, JavaRDD<String> rawTriples2, String RAW_TRIPLES_SEPARATOR, JavaRDD<String> gt, String GT_SEPARATOR) {
+        Object2IntOpenHashMap<String> entityIds1 = getEntityIdsMapping(rawTriples1, RAW_TRIPLES_SEPARATOR);
+        Object2IntOpenHashMap<String> entityIds2 = getEntityIdsMapping(rawTriples2, RAW_TRIPLES_SEPARATOR);
+        return gt.mapToPair(line -> {
+                    String [] parts = line.split(GT_SEPARATOR);
+                    return new Tuple2<>(-entityIds2.getOrDefault(parts[1], 1), //negative id first
+                                        entityIds1.getOrDefault(parts[0], -1)); //positive id second
+                });
     }
 }

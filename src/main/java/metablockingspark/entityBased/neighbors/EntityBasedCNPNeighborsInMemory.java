@@ -112,11 +112,12 @@ public class EntityBasedCNPNeighborsInMemory implements Serializable {
                     weights = Utils.sortByValue(weights, true);                                        
                     Int2FloatOpenHashMap weightsToEmit = new Int2FloatOpenHashMap();                                      
                     int i = 0;
-                    for (int neighbor : weights.keySet()) {
+                    for (int neighbor : weights.keySet()) {                        
                         if (i == weights.size() || i == K) {
                             break;
                         }
                         weightsToEmit.put(neighbor, (float)weights.get(neighbor));
+                        i++;
                     }
                     
                     return new Tuple2<>(entityId, weightsToEmit);

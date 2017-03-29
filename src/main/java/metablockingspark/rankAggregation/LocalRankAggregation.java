@@ -41,7 +41,7 @@ public class LocalRankAggregation implements Serializable {
         return topKValueCandidates
                 .mapValues(x -> {
                     Map<Integer, Float> rankedCandidates = new HashMap<>();
-                    //sort value by valueSim
+                    //sort by descending value sim
                     for (Map.Entry<Integer, Float> entry : x.entrySet()) {
                        rankedCandidates.put(entry.getKey(), entry.getValue());
                     }                    
