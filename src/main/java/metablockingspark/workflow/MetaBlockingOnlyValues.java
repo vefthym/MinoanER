@@ -21,7 +21,7 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import metablockingspark.entityBased.EntityBasedCNPInMemory;
+import metablockingspark.entityBased.EntityBasedCNP;
 import metablockingspark.preprocessing.BlockFiltering;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
@@ -150,7 +150,7 @@ public class MetaBlockingOnlyValues {
         
         //CNP
         System.out.println("\n\nStarting CNP...");
-        EntityBasedCNPInMemory cnp = new EntityBasedCNPInMemory();
+        EntityBasedCNP cnp = new EntityBasedCNP();
         //EntityBasedCNP cnp = new EntityBasedCNP();
         JavaPairRDD<Integer,IntArrayList> metablockingResults = cnp.run(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
         

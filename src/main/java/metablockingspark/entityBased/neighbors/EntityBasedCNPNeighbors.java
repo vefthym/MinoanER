@@ -30,7 +30,6 @@ import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
-import org.apache.spark.storage.StorageLevel;
 import scala.Serializable;
 import scala.Tuple2;
 
@@ -38,21 +37,35 @@ import scala.Tuple2;
  *
  * @author vefthym
  */
-public class EntityBasedCNPNeighborsInMemory implements Serializable {
+public class EntityBasedCNPNeighbors implements Serializable {
     
     
+    /**
+     * 
+     * @param topKvalueCandidates the topK results per entity, acquired from value similarity
+     * @param rawTriples1 the rdf triples of the first entity collection
+     * @param rawTriples2 the rdf triples of the second entity collection
+     * @param SEPARATOR the delimiter that separates subjects, predicates and objects in the rawTriples1 and rawTriples2 files
+     * @param entityIds1 the mapping of entity urls to entity ids, as it was used in blocking
+     * @param MIN_SUPPORT_THRESHOLD the minimum support threshold, below which, relations are discarded from top relations
+     * @param K the K for topK candidate matches
+     * @param N the N for topN rdf relations (and neighbors)
+     * @param jsc the java spark context used to load files and broadcast variables
+     * @return topK neighbor candidates per entity
+     */
     public JavaPairRDD<Integer, IntArrayList> run(JavaPairRDD<Integer,Int2FloatOpenHashMap> topKvalueCandidates, 
             JavaRDD<String> rawTriples1, 
-            JavaRDD<String> rawTriples2, 
+            JavaRDD<String> rawTriples2,             
             String SEPARATOR, 
+            JavaRDD<String> entityIds1, 
+            JavaRDD<String> entityIds2, 
             float MIN_SUPPORT_THRESHOLD,
             int K,
             int N, 
-            JavaSparkContext jsc, 
-            int PARALLELISM) {
+            JavaSparkContext jsc) {
         
-        Map<Integer,IntArrayList> inNeighbors = new HashMap<>(new RelationsRank().run(rawTriples1, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, true, jsc, PARALLELISM));
-        inNeighbors.putAll(new RelationsRank().run(rawTriples2, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, false, jsc, PARALLELISM));
+        Map<Integer,IntArrayList> inNeighbors = new HashMap<>(new RelationsRank().run(rawTriples1, SEPARATOR, entityIds1, MIN_SUPPORT_THRESHOLD, N, true, jsc));
+        inNeighbors.putAll(new RelationsRank().run(rawTriples2, SEPARATOR, entityIds2, MIN_SUPPORT_THRESHOLD, N, false, jsc));
         
         Broadcast<Map<Integer,IntArrayList>> inNeighbors_BV = jsc.broadcast(inNeighbors);
         

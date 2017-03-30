@@ -35,7 +35,7 @@ import org.apache.spark.util.LongAccumulator;
 import scala.Tuple2;
 
 /**
- * @deprecated use BlockFilteringAdvanced
+ * @deprecated use {@link metablockingspark.preprocessing.BlockFilteringAdvanced}
  * @author vefthym
  */
 public class BlockFiltering {

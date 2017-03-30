@@ -21,9 +21,8 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import metablocking.matching.ReciprocalMatching;
-import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighborsInMemory;
-import metablockingspark.evaluation.EvaluateMatchingResults;
+import metablockingspark.matching.ReciprocalMatching;
+import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighbors;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
 import metablockingspark.preprocessing.EntityWeightsWJS;
@@ -34,7 +33,6 @@ import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.SparkSession;
-import org.apache.spark.storage.StorageLevel;
 import org.apache.spark.util.LongAccumulator;
 
 /**
@@ -51,6 +49,7 @@ public class FullMetaBlockingWorkflow {
         String inputPath;      
         String outputPath;
         String inputTriples1, inputTriples2;
+        String entityIds1, entityIds2;
         
         
         if (args.length == 0) {
@@ -61,14 +60,19 @@ public class FullMetaBlockingWorkflow {
             inputPath = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testInput";  
             inputTriples1 = "";
             inputTriples2 = "";
+            entityIds1 = "";
+            entityIds2 = "";
             outputPath = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testOutput";            
-        } else if (args.length == 4) {            
+        } else if (args.length == 6) {            
             tmpPath = "/file:/tmp";
             //master = "spark://master:7077";
             inputPath = args[0];
             inputTriples1 = args[1];
             inputTriples2 = args[2];
-            outputPath = args[3];
+            entityIds1 = args[3];
+            entityIds2 = args[4];
+            outputPath = args[5];
+            
             // delete existing output directories
             try {                                
                 Utils.deleteHDFSPath(outputPath);
@@ -80,7 +84,9 @@ public class FullMetaBlockingWorkflow {
                     + "0: inputBlocking"
                     + "1: inputTriples1 (raw rdf triples)"
                     + "2: inputTriples2 (raw rdf triples)"
-                    + "3: outputPath");
+                    + "3: entityIds1: entityUrl\tentityId (positive)"
+                    + "4: entityIds2: entityUrl\tentityId (also positive)"
+                    + "5: outputPath");
             return;
         }
                        
@@ -102,7 +108,7 @@ public class FullMetaBlockingWorkflow {
                 
             .config("spark.executor.instances", NUM_EXECUTORS)
             .config("spark.executor.cores", NUM_EXECUTOR_CORES)
-            .config("spark.executor.memory", "50G")
+            .config("spark.executor.memory", "60G")
             //.config("spark.driver.memory", "10g") //not working
             
             //memory configurations (deprecated)
@@ -193,7 +199,7 @@ public class FullMetaBlockingWorkflow {
         final int N = 3; //for top-N neighbors
         
         System.out.println("Getting the top K value candidates...");
-        EntityBasedCNPNeighborsInMemory cnp = new EntityBasedCNPNeighborsInMemory();        
+        EntityBasedCNPNeighbors cnp = new EntityBasedCNPNeighbors();        
         JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
         //totalWeights_BV.unpersist();
         //totalWeights_BV.destroy();
@@ -202,7 +208,15 @@ public class FullMetaBlockingWorkflow {
         //topKValueCandidates.setName("topKValueCandidates").persist(StorageLevel.MEMORY_AND_DISK_SER());
         
         System.out.println("Getting the top K neighbor candidates...");
-        JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates = cnp.run(topKValueCandidates, jsc.textFile(inputTriples1), jsc.textFile(inputTriples2), SEPARATOR, MIN_SUPPORT_THRESHOLD, K, N, jsc, PARALLELISM);
+        JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates = cnp.run(
+                topKValueCandidates, 
+                jsc.textFile(inputTriples1, PARALLELISM), 
+                jsc.textFile(inputTriples2, PARALLELISM), 
+                SEPARATOR, 
+                jsc.textFile(entityIds1),
+                jsc.textFile(entityIds2),
+                MIN_SUPPORT_THRESHOLD, K, N, 
+                jsc);
         
         //rank aggregation        
         System.out.println("Starting rank aggregation...");
@@ -212,32 +226,10 @@ public class FullMetaBlockingWorkflow {
         System.out.println("Starting reciprocal matching...");
         JavaPairRDD<Integer,Integer> matches = new ReciprocalMatching().getReciprocalMatches(aggregates);
         
-        //comment-out the following when using evaluation
+        
         System.out.println("Writing results to HDFS...");
         matches.saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)        
         System.out.println("Job finished successfully. Output written in "+outputPath);
-        
-        /*
-        long numMatches = matches.count(); //only to add an action
-        System.out.println("Job finished successfully. Found "+numMatches+" matches. Now starting the evaluation...");
-        
-        
-        
-        //unpersist all RDDs and destroy all Broadcasts (not sure if needed)
-        totalWeights_BV.unpersist();
-        totalWeights_BV.destroy();
-        
-        //Start the evaluation        
-        LongAccumulator TPs = jsc.sc().longAccumulator("TPs");
-        LongAccumulator FPs = jsc.sc().longAccumulator("FPs");
-        LongAccumulator FNs = jsc.sc().longAccumulator("FNs");
-        EvaluateMatchingResults evaluation = new EvaluateMatchingResults();
-        
-        JavaPairRDD<Integer,Integer> gt = Utils.getGroundTruthIds(jsc.textFile(inputTriples1), jsc.textFile(inputTriples2), SEPARATOR, jsc.textFile("gtPath"), SEPARATOR);
-        evaluation.evaluateResults(matches, gt, TPs, FPs, FNs);
-        System.out.println("Evaluation finished successfully.");
-        evaluation.printResults(TPs.value(), FPs.value(), FNs.value());                
-        */
         
         spark.stop();
     }

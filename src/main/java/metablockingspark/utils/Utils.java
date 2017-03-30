@@ -28,7 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.stream.Collectors;
-import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighborsInMemory;
+import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighbors;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -84,6 +84,7 @@ public class Utils {
     }
     
     /**
+     * @deprecated use {@link #readEntityIdsMapping(JavaRDD)} instead, to get the entity mappings used in blocking
      * Maps an entity url to its entity id, that is also used by blocking.
      * @param rawTriples
      * @param SEPARATOR
@@ -106,6 +107,21 @@ public class Utils {
     }
     
     /**
+     * Maps an entity url to its entity id, that is also used by blocking.
+     * @param entityIdsText     
+     * @return a map from an entity url to its entity id, that is also used by blocking.
+     */
+    public static Object2IntOpenHashMap<String> readEntityIdsMapping(JavaRDD<String> entityIdsText) {        
+        return new Object2IntOpenHashMap<>(entityIdsText
+            .mapToPair(line -> {
+                String[] parts = line.split("\t");
+                return new Tuple2<>(parts[0], Integer.parseInt(parts[1]));
+            })
+            .collectAsMap());
+    }
+    
+    /**
+     * @deprecated use {@link #getGroundTruthIdsFromEntityIds(JavaRDD, JavaRDD,JavaRDD, String)} instead
      * Return the ground truth in an RDD format, each entity represented with an integer entity id. 
      * @param rawTriples1
      * @param rawTriples2
@@ -116,11 +132,33 @@ public class Utils {
      */
     public static JavaPairRDD<Integer,Integer> getGroundTruthIds (JavaRDD<String> rawTriples1, JavaRDD<String> rawTriples2, String RAW_TRIPLES_SEPARATOR, JavaRDD<String> gt, String GT_SEPARATOR) {
         Object2IntOpenHashMap<String> entityIds1 = getEntityIdsMapping(rawTriples1, RAW_TRIPLES_SEPARATOR);
-        Object2IntOpenHashMap<String> entityIds2 = getEntityIdsMapping(rawTriples2, RAW_TRIPLES_SEPARATOR);
+        Object2IntOpenHashMap<String> entityIds2 = getEntityIdsMapping(rawTriples2, RAW_TRIPLES_SEPARATOR); 
+        
         return gt.mapToPair(line -> {
                     String [] parts = line.split(GT_SEPARATOR);
                     return new Tuple2<>(-entityIds2.getOrDefault(parts[1], 1), //negative id first
                                         entityIds1.getOrDefault(parts[0], -1)); //positive id second
                 });
     }
+    
+    
+    /**
+     * Return the ground truth in an RDD format, each entity represented with an integer entity id. 
+     * @param entityIds1RDD
+     * @param entityIds2RDD
+     * @param gt
+     * @param GT_SEPARATOR
+     * @return 
+     */
+    public static JavaPairRDD<Integer,Integer> getGroundTruthIdsFromEntityIds (JavaRDD<String> entityIds1RDD, JavaRDD<String> entityIds2RDD, JavaRDD<String> gt, String GT_SEPARATOR) {
+        Object2IntOpenHashMap<String> entityIds1 = readEntityIdsMapping(entityIds1RDD);
+        Object2IntOpenHashMap<String> entityIds2 = readEntityIdsMapping(entityIds2RDD); 
+        
+        return gt.mapToPair(line -> {
+                    String [] parts = line.split(GT_SEPARATOR);
+                    return new Tuple2<>(-entityIds2.getOrDefault(parts[1], 1), //negative id first
+                                        entityIds1.getOrDefault(parts[0], -1)); //positive id second
+                });
+    }
+    
 }

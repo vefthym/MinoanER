@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package metablocking.matching;
+package metablockingspark.matching;
 
 import org.apache.spark.api.java.JavaPairRDD;
 import scala.Tuple2;

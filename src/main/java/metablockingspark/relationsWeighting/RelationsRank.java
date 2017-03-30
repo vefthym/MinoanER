@@ -18,22 +18,17 @@ package metablockingspark.relationsWeighting;
 import com.google.common.collect.Ordering;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
-import java.io.IOException;
 import java.io.Serializable;
-import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.broadcast.Broadcast;
-import org.apache.spark.sql.SparkSession;
 import org.apache.spark.storage.StorageLevel;
 import scala.Tuple2;
 
@@ -50,20 +45,22 @@ public class RelationsRank {
      * @param MIN_SUPPORT_THRESHOLD
      * @param N topN neighbors per entity
      * @param positiveIds
+     * @param jsc
      * @return 
      */
-    public Map<Integer,IntArrayList> run(JavaRDD<String> rawTriples, String SEPARATOR, float MIN_SUPPORT_THRESHOLD, int N, boolean positiveIds, JavaSparkContext jsc, int PARALLELISM) {
+    public Map<Integer,IntArrayList> run(JavaRDD<String> rawTriples, String SEPARATOR, JavaRDD<String> entityIdsRDD, float MIN_SUPPORT_THRESHOLD, int N, boolean positiveIds, JavaSparkContext jsc) {
         rawTriples.persist(StorageLevel.MEMORY_AND_DISK_SER());        
         
         //List<String> subjects = Utils.getEntityUrlsFromEntityRDDInOrder(rawTriples, SEPARATOR); //a list of (distinct) subject URLs, keeping insertion order (from original triples file)        
-        Object2IntOpenHashMap<String> subjects = Utils.getEntityIdsMapping(rawTriples, SEPARATOR);
-        System.out.println("Found "+subjects.size()+" entities in collection "+ (positiveIds?"1":"2"));
+        //Object2IntOpenHashMap<String> subjects = Utils.getEntityIdsMapping(rawTriples, SEPARATOR);
+        Object2IntOpenHashMap<String> entityIds = Utils.readEntityIdsMapping(entityIdsRDD);
+        System.out.println("Found "+entityIds.size()+" entities in collection "+ (positiveIds?"1":"2"));
         
-        long numEntitiesSquared = (long)subjects.keySet().size();
+        long numEntitiesSquared = (long)entityIds.keySet().size();
         
-        Broadcast<Object2IntOpenHashMap<String>> subjects_BV = jsc.broadcast(subjects);
+        Broadcast<Object2IntOpenHashMap<String>> entityIds_BV = jsc.broadcast(entityIds);
         
-        JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex = getRelationIndex(rawTriples, SEPARATOR, subjects_BV, PARALLELISM);        
+        JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex = getRelationIndex(rawTriples, SEPARATOR, entityIds_BV);        
         
         rawTriples.unpersist();        
         relationIndex.persist(StorageLevel.MEMORY_AND_DISK_SER());        
@@ -94,48 +91,7 @@ public class RelationsRank {
         JavaPairRDD<String,Float> discrims = getDiscriminabilityOfRelations(relationIndex);
         
         return getSortedRelations(supports, discrims);
-    }
-    
-    /**
-     * Returns a relation index of the form: key: relationString, value: list of (subjectId, objectId) linked by this relation.
-     * @param rawTriples
-     * @param SEPARATOR
-     * @param subjects
-     * @return a relation index of the form: key: relationString, value: list of (subjectId, objectId) linked by this relation
-     */
-    public JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> getRelationIndex(JavaRDD<String> rawTriples, String SEPARATOR, List<String> subjects) {
-        return rawTriples.mapToPair(line -> {
-          String[] spo = line.replaceAll(" \\.$", "").split(SEPARATOR);
-          if (spo.length != 3) {
-              return null;
-          }
-          Integer subjectId = subjects.indexOf(spo[0]); //replace subject url with entity id (subjects belongs to subjects by default) //TODO: too slow
-          Integer objectId = subjects.indexOf(spo[2]); //-1 if the object is not an entity, otherwise the entityId      //TODO: too slow!     
-          return new Tuple2<>(spo[1], new Tuple2<>(subjectId, objectId)); //relation, (subjectId, objectId)
-        })
-        .filter(x -> x!= null)
-        .groupByKey()       
-        .filter(x -> {
-            int relationCount = 0;
-            int numInstances = 0;
-            for (Tuple2<Integer,Integer> so : x._2()) {
-                numInstances++;
-                if (so._2() != -1) {
-                    relationCount++;
-                }
-            }
-            return relationCount > (numInstances-relationCount); //majority voting (is this property used more as a relation or as a datatype property?
-        })
-        .mapValues(x -> {
-            List<Tuple2<Integer,Integer>> relationsOnly = new ArrayList<>();
-            for (Tuple2<Integer,Integer> so : x) {                
-                if (so._2() != -1) {
-                    relationsOnly.add(new Tuple2<>(so._1(), so._2()));
-                } 
-            }
-            return relationsOnly;
-        });        
-    }
+    }   
     
     /**
      * Returns a relation index of the form: key: relationString, value: list of (subjectId, objectId) linked by this relation.
@@ -144,9 +100,8 @@ public class RelationsRank {
      * @param subjects_BV
      * @return a relation index of the form: key: relationString, value: list of (subjectId, objectId) linked by this relation
      */
-    public JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> getRelationIndex(JavaRDD<String> rawTriples, String SEPARATOR, Broadcast<Object2IntOpenHashMap<String>> subjects_BV, int PARALLELISM) {        
-        JavaPairRDD<String,Tuple2<Integer,Integer>> rawRelationsRDD = rawTriples
-        .repartition(PARALLELISM)
+    public JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> getRelationIndex(JavaRDD<String> rawTriples, String SEPARATOR, Broadcast<Object2IntOpenHashMap<String>> subjects_BV) {        
+        JavaPairRDD<String,Tuple2<Integer,Integer>> rawRelationsRDD = rawTriples        
         .mapToPair(line -> {
           String[] spo = line.replaceAll(" \\.$", "").split(SEPARATOR);
           if (spo.length != 3) {
@@ -278,72 +233,6 @@ public class RelationsRank {
         });
        
     }
-    
-    
-    //only for testing purposes
-    public static void main (String[] args) {
-        String tmpPath;
-        String master;
-        String inputPath1, inputPath2;        
-        String outputPath;
-        
-        if (args.length == 0) {
-            System.setProperty("hadoop.home.dir", "C:\\Users\\VASILIS\\Documents\\hadoop_home"); //only for local mode
-            
-            tmpPath = "/file:C:\\tmp";
-            master = "local[2]";
-            inputPath1 = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testInput1";            
-            inputPath2 = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testInput2";            
-            outputPath = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testOutput";            
-        } else {            
-            tmpPath = "/file:/tmp";            
-            inputPath1 = args[0];            
-            inputPath2 = args[1];            
-            outputPath = args[2];
-            // delete existing output directories
-            try {                                
-                Utils.deleteHDFSPath(outputPath);
-            } catch (IOException | URISyntaxException ex) {
-                Logger.getLogger(RelationsRank.class.getName()).log(Level.SEVERE, null, ex);
-            }
-        }
-                       
-        final int NUM_CORES_IN_CLUSTER = 128; //128 in ISL cluster, 28 in okeanos cluster
-                       
-        SparkSession spark = SparkSession.builder()
-            .appName("MetaBlocking WJS on " +
-                inputPath1.substring(inputPath1.lastIndexOf("/", inputPath1.length()-2)+1)+" and "+
-                inputPath2.substring(inputPath2.lastIndexOf("/", inputPath2.length()-2)+1))
-            .config("spark.sql.warehouse.dir", tmpPath)
-            .config("spark.eventLog.enabled", true)
-            .config("spark.default.parallelism", NUM_CORES_IN_CLUSTER * 4) //x tasks for each core (128 cores) --> x "reduce" rounds
-            .config("spark.rdd.compress", true)
-            
-            //memory configurations (deprecated)            
-            .config("spark.memory.useLegacyMode", true)
-            .config("spark.shuffle.memoryFraction", 0.4)
-            .config("spark.storage.memoryFraction", 0.4)                
-            .config("spark.memory.offHeap.enabled", true)
-            .config("spark.memory.offHeap.size", "10g")            
-
-            .getOrCreate();        
-        
-        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());
-        
-        final String SEPARATOR = " ";
-        final float MIN_SUPPORT_THRESHOLD = 0.01f;
-        final int N = 3;
-        final int PARALLELISM = 152;
-        
-        JavaRDD<String> rawTriples1 = jsc.textFile(inputPath1);
-        JavaRDD<String> rawTriples2 = jsc.textFile(inputPath2);
-        
-        RelationsRank rr = new RelationsRank();
-        Map<Integer, IntArrayList> topNeighbors1 = rr.run(rawTriples1, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, true, jsc, PARALLELISM);
-        Map<Integer, IntArrayList> topNeighbors2 = rr.run(rawTriples2, SEPARATOR, MIN_SUPPORT_THRESHOLD, N, false, jsc, PARALLELISM);
-        
-    }
-
     
     
 /**

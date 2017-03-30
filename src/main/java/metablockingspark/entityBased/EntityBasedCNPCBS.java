@@ -27,9 +27,9 @@ import scala.Tuple2;
  * Entity based approach for CNP pruning (local top-k) using the CBS (common blocks) weighting scheme. 
  * @author vefthym
  */
-public class EntityBasedCNPCBSUncompressed {
+public class EntityBasedCNPCBS {
 
-    public JavaPairRDD<Integer,Integer[]> run(JavaPairRDD<Integer, IntArrayList> blocksFromEI, int K) {
+    public JavaPairRDD<Integer,IntArrayList> run(JavaPairRDD<Integer, IntArrayList> blocksFromEI, int K) {
         
         //map phase
         //resulting RDD is of the form <entityId, [candidateMatchIds]>
@@ -38,34 +38,28 @@ public class EntityBasedCNPCBSUncompressed {
         //reduce phase
         //metaBlockingResults: key: an entityId, value: an array of topK candidate matches, in descending order of score (match likelihood)
         return mapOutput.groupByKey() //for each entity create an iterable of arrays of candidate matches (one array from each common block)
-                .mapToPair(x -> {
-                    Integer entityId = x._1();
-                    
+                .mapValues(x -> {               
                     //find number of common blocks
                     Map<Integer,Double> counters = new HashMap<>(); //number of common blocks with current entity per candidate match
-                    for(IntArrayList neighbors : x._2()) {      //neighbors in the blocking graph           
-                        for (int neighborId : neighbors) {                             
-                            Double count = counters.get(neighborId);
-                            if (count == null) {
-                                count = 0.0;
-                            }
-                            counters.put(neighborId, count+1);
+                    for(IntArrayList block : x) {      //neighbors in the blocking graph           
+                        for (int candidateMatch : block) {                                                         
+                            counters.put(candidateMatch, counters.getOrDefault(candidateMatch, 0.0)+1);
                         }
                     }
                     
                     //keep the top-K weights
                     counters = Utils.sortByValue(counters, true);                    
-                    Integer[] candidateMatchesSorted = new Integer[Math.min(counters.size(), K)];                    
+                    IntArrayList candidateMatchesSorted = new IntArrayList();
                     
                     int i = 0;
-                    for (Integer neighbor : counters.keySet()) {
+                    for (int candidateMatch : counters.keySet()) {
                         if (i == counters.size() || i == K) {
                             break;
                         }
-                        candidateMatchesSorted[i++] = neighbor;                        
+                        candidateMatchesSorted.add(i++, candidateMatch);                        
                     }
                     
-                    return new Tuple2<Integer,Integer[]>(entityId, candidateMatchesSorted);
+                    return candidateMatchesSorted;
                 });
                 
     }

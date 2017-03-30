@@ -21,7 +21,7 @@ import java.net.URISyntaxException;
 import java.util.Arrays;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import metablockingspark.entityBased.EntityBasedCNPCBSUncompressed;
+import metablockingspark.entityBased.EntityBasedCNPCBS;
 import metablockingspark.preprocessing.BlockFiltering;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
@@ -67,34 +67,29 @@ public class MetaBlockingOnlyValuesCBS {
             }
         }
         
-        final int NUM_CORES_IN_CLUSTER = 128;
+        //tuning params
+        final int NUM_CORES_IN_CLUSTER = 152; //152 in ISL cluster, 28 in okeanos cluster
+        final int NUM_WORKERS = 4; //4 in ISL cluster, 14 in okeanos cluster
+        final int NUM_EXECUTORS = NUM_WORKERS * 3;
+        final int NUM_EXECUTOR_CORES = NUM_CORES_IN_CLUSTER/NUM_EXECUTORS;
+        final int PARALLELISM = NUM_EXECUTORS * NUM_EXECUTOR_CORES * 3; //spark tuning documentation suggests 2 or 3, unless OOM error (in that case more)
                        
         SparkSession spark = SparkSession.builder()
             .appName("MetaBlocking CBS only values on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1)) 
             .config("spark.sql.warehouse.dir", tmpPath)
             .config("spark.eventLog.enabled", true)
-            .config("spark.default.parallelism", NUM_CORES_IN_CLUSTER * 4) //x tasks for each core (128 cores) --> x "reduce" rounds
+            .config("spark.default.parallelism", PARALLELISM) //x tasks for each core --> x "reduce" rounds
             .config("spark.rdd.compress", true)
-            
-            //memory configurations (deprecated)            
-            .config("spark.memory.useLegacyMode", true)
-            .config("spark.shuffle.memoryFraction", 0.4)
-            .config("spark.storage.memoryFraction", 0.4) 
+            .config("spark.network.timeout", "600s")
+            .config("spark.executor.heartbeatInterval", "20s")    
                 
-            .config("spark.memory.offHeap.enabled", true)
-            .config("spark.memory.offHeap.size", "10g")
-            
-            
-            //un-comment the following for Kryo serializer (does not seem to improve compression, only speed)            
-            /*
-            .config("spark.kryo.registrator", MyKryoRegistrator.class.getName())
-            .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-            .config("spark.kryo.registrationRequired", true) //just to be safe that everything is serialized as it should be (otherwise runtime error)
-            */
-            
-            //.master(master)
-            .getOrCreate();        
-        
+            .config("spark.executor.instances", NUM_EXECUTORS)
+            .config("spark.executor.cores", NUM_EXECUTOR_CORES)
+            .config("spark.executor.memory", "60G")            
+                
+            .config("spark.driver.maxResultSize", "2g")
+                
+            .getOrCreate();
         
         
         JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());        
@@ -111,12 +106,8 @@ public class MetaBlockingOnlyValuesCBS {
         
         BlockFilteringAdvanced bf = new BlockFilteringAdvanced();
         JavaPairRDD<Integer,IntArrayList> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
-        entityIndex.cache();
-        //entityIndex.persist(StorageLevel.DISK_ONLY_2()); //store to disk with replication factor 2
-        
-        
-        //long numEntities = entityIndex.keys().count();
-        
+        entityIndex.cache();        
+                
         //Blocks From Entity Index
         System.out.println("\n\nStarting BlocksFromEntityIndex...");
                 
@@ -141,12 +132,11 @@ public class MetaBlockingOnlyValuesCBS {
         
         //CNP
         System.out.println("\n\nStarting CNP...");
-        //EntityBasedCNPCBSCompressed cnp = new EntityBasedCNPCBSCompressed(); //biggger shuffle size than usign Java Serializer without Hadoop Writables
-        EntityBasedCNPCBSUncompressed cnp = new EntityBasedCNPCBSUncompressed();
-        JavaPairRDD<Integer,Integer[]> metablockingResults = cnp.run(blocksFromEI, K);
+        EntityBasedCNPCBS cnp = new EntityBasedCNPCBS();
+        JavaPairRDD<Integer,IntArrayList> metablockingResults = cnp.run(blocksFromEI, K);
         
         metablockingResults
-                .mapValues(x -> Arrays.toString(x)).saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)
+                .mapValues(x -> x.toString()).saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)
         System.out.println("Job finished successfully. Output written in "+outputPath);
     }
     
