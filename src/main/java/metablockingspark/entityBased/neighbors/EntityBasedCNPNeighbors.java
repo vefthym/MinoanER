@@ -18,6 +18,7 @@ package metablockingspark.entityBased.neighbors;
 
 import metablockingspark.entityBased.*;
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -47,6 +48,7 @@ public class EntityBasedCNPNeighbors implements Serializable {
      * @param rawTriples2 the rdf triples of the second entity collection
      * @param SEPARATOR the delimiter that separates subjects, predicates and objects in the rawTriples1 and rawTriples2 files
      * @param entityIds1 the mapping of entity urls to entity ids, as it was used in blocking
+     * @param entityIds2
      * @param MIN_SUPPORT_THRESHOLD the minimum support threshold, below which, relations are discarded from top relations
      * @param K the K for topK candidate matches
      * @param N the N for topN rdf relations (and neighbors)
@@ -80,45 +82,50 @@ public class EntityBasedCNPNeighbors implements Serializable {
     /**
      * 
      * @param blocksFromEI
-     * @param totalWeightsBV
+     * @param totalWeightsBV    
      * @param K
      * @param numNegativeEntities
      * @param numPositiveEntities
      * @return key: an entityId, value: a list of pairs of candidate matches along with their value_sim with the key
      */
-    public JavaPairRDD<Integer,Int2FloatOpenHashMap> getTopKValueSims(JavaPairRDD<Integer, IntArrayList> blocksFromEI, Broadcast<Int2FloatOpenHashMap> totalWeightsBV, int K, long numNegativeEntities, long numPositiveEntities) {
-                
-        //totalWeightsBV.unpersist();
-        //totalWeightsBV.destroy();
-        
-        JavaPairRDD<Integer, IntArrayList> mapOutput = EntityBasedCNPMapPhase.getMapOutput(blocksFromEI);
+    public JavaPairRDD<Integer,Int2FloatOpenHashMap> getTopKValueSims(JavaPairRDD<Integer, IntArrayList> blocksFromEI, Broadcast<Int2FloatOpenHashMap> totalWeightsBV, int K, long numNegativeEntities, long numPositiveEntities) {                
+    
+        //key: an entityId, value: a list of candidate matches, with first number being the number of entities from the same collection in this block
+        JavaPairRDD<Integer, IntArrayList> mapOutput = EntityBasedCNPMapPhase.getMapOutputWJS(blocksFromEI);
                
         //reduce phase
         //metaBlockingResults: key: a negative entityId, value: a list of candidate matches (positive entity ids) along with their value_sim with the key
         return mapOutput
                 .groupByKey() //for each entity create an iterable of arrays of candidate matches (one array from each common block)                
                 .mapToPair(x -> {
-                    Integer entityId = x._1();
+                    int entityId = x._1();
                     
                     //compute the numerators
                     Int2FloatOpenHashMap counters = new Int2FloatOpenHashMap(); //number of common blocks with current entity per candidate match
                     for(IntArrayList candidates : x._2()) {
-                        int numNegativeEntitiesInBlock = (int) candidates.stream().filter(eid -> eid<0).count();        
-                        int numPositiveEntitiesInBlock = candidates.size() - numNegativeEntitiesInBlock;
+                        if (candidates.isEmpty()) continue; //still don't know why we need this line... such cases should have been filtered
+                        int numNegativeEntitiesInBlock = candidates.getInt(0); //the first element is the number of entities from the same collection
+                        int numPositiveEntitiesInBlock = candidates.size()-1; //all the other candidates are positive entity ids
+                        if (entityId >= 0) {
+                            numPositiveEntitiesInBlock = candidates.getInt(0);
+                            numNegativeEntitiesInBlock = candidates.size()-1;
+                        }
                         float weight1 = (float) Math.log10((double)numNegativeEntities/numNegativeEntitiesInBlock);
                         float weight2 = (float) Math.log10((double)numPositiveEntities/numPositiveEntitiesInBlock);
                         
-                        for (int neighborId : candidates) {
-                            counters.addTo(neighborId, weight1+weight2);                    
+                        candidates.removeInt(0); //remove the first element which is the number of entities in this block from the same collection as the entityId
+                        
+                        for (int candidateId : candidates) {
+                            counters.addTo(candidateId, weight1+weight2);                    
                         }
                     }
                                         
                     //calculate the weight of each edge in the blocking graph (i.e., for each candidate match)
                     Map<Integer, Float> weights = new HashMap<>();
-                    float entityWeight = totalWeightsBV.value().get(entityId.intValue());
-                    for (int neighborId : counters.keySet()) {
-			float currentWeight = counters.get(neighborId) / (Float.MIN_NORMAL + entityWeight + totalWeightsBV.value().get(neighborId));
-			weights.put(neighborId, currentWeight);			
+                    float entityWeight = totalWeightsBV.value().get(entityId);
+                    for (int candidateId : counters.keySet()) {
+			float currentWeight = counters.get(candidateId) / (Float.MIN_NORMAL + entityWeight + totalWeightsBV.value().get(candidateId));
+			weights.put(candidateId, currentWeight);			
                     }
                     
                     //keep the top-K weights

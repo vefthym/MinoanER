@@ -38,7 +38,7 @@ public class EntityBasedCNP implements Serializable {
         totalWeightsBV.unpersist();
         totalWeightsBV.destroy();
         
-        JavaPairRDD<Integer, IntArrayList> mapOutput = EntityBasedCNPMapPhase.getMapOutput(blocksFromEI);
+        JavaPairRDD<Integer, IntArrayList> mapOutput = EntityBasedCNPMapPhase.getMapOutputWJS(blocksFromEI);
                
         //reduce phase
         //the following is cheap to compute (one shuffle needed), but can easily give OOM error
@@ -50,10 +50,17 @@ public class EntityBasedCNP implements Serializable {
                     //compute the numerators
                     Int2FloatOpenHashMap counters = new Int2FloatOpenHashMap(); //number of common blocks with current entity per candidate match
                     for(IntArrayList candidates : x._2()) {                       
-                        int numNegativeEntitiesInBlock = getNumNegativeEntitiesInBlock(candidates);
-                        int numPositiveEntitiesInBlock = candidates.size() - numNegativeEntitiesInBlock;
+                        if (candidates.isEmpty()) continue; //still don't know why we need this line... such cases should have been filtered
+                        int numNegativeEntitiesInBlock = candidates.getInt(0); //the first element is the number of entities from the same collection
+                        int numPositiveEntitiesInBlock = candidates.size()-1; //all the other candidates are positive entity ids
+                        if (entityId >= 0) {
+                            numPositiveEntitiesInBlock = candidates.getInt(0);
+                            numNegativeEntitiesInBlock = candidates.size()-1;
+                        }
                         float weight1 = (float) Math.log10((double)numNegativeEntities/numNegativeEntitiesInBlock);
                         float weight2 = (float) Math.log10((double)numPositiveEntities/numPositiveEntitiesInBlock);
+                        
+                        candidates.removeInt(0); //remove the first element which is the number of entities in this block from the same collection as the entityId
                         
                         for (int neighborId : candidates) {
                             counters.addTo(neighborId, weight1+weight2);                    

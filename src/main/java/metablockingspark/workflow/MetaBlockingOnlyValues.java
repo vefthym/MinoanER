@@ -22,7 +22,6 @@ import java.net.URISyntaxException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import metablockingspark.entityBased.EntityBasedCNP;
-import metablockingspark.preprocessing.BlockFiltering;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
 import metablockingspark.preprocessing.EntityWeightsWJS;
@@ -65,37 +64,14 @@ public class MetaBlockingOnlyValues {
             try {                                
                 Utils.deleteHDFSPath(outputPath);
             } catch (IOException | URISyntaxException ex) {
-                Logger.getLogger(BlockFiltering.class.getName()).log(Level.SEVERE, null, ex);
+                Logger.getLogger(MetaBlockingOnlyValues.class.getName()).log(Level.SEVERE, null, ex);
             }
         }
-                       
-        final int NUM_CORES_IN_CLUSTER = 128; //128 in ISL cluster, 28 in okeanos cluster
-                       
-        SparkSession spark = SparkSession.builder()
-            .appName("MetaBlocking WJS only values on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1)) 
-            .config("spark.sql.warehouse.dir", tmpPath)
-            .config("spark.eventLog.enabled", true)
-            .config("spark.default.parallelism", NUM_CORES_IN_CLUSTER * 4) //x tasks for each core (128 cores) --> x "reduce" rounds
-            .config("spark.rdd.compress", true)
-            
-            //memory configurations (deprecated)            
-            .config("spark.memory.useLegacyMode", true)
-            .config("spark.shuffle.memoryFraction", 0.4)
-            .config("spark.storage.memoryFraction", 0.4)                
-            .config("spark.memory.offHeap.enabled", true)
-            .config("spark.memory.offHeap.size", "10g")            
-            
-            //un-comment the following for Kryo serializer (does not seem to improve compression, only speed)            
-            /*
-            .config("spark.kryo.registrator", MyKryoRegistrator.class.getName())
-            .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-            .config("spark.kryo.registrationRequired", true) //just to be safe that everything is serialized as it should be (otherwise runtime error)
-            */
-            .getOrCreate();        
         
-        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());        
-        LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();
-        
+        String appName = "MetaBlocking WJS only values on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1);
+        SparkSession spark = Utils.setUpSpark(appName, 3, tmpPath);
+        int PARALLELISM = spark.sparkContext().getConf().getInt("spark.default.parallelism", 152);        
+        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());                        
         
         ////////////////////////
         //start the processing//
@@ -103,7 +79,7 @@ public class MetaBlockingOnlyValues {
         
         //Block Filtering
         System.out.println("\n\nStarting BlockFiltering, reading from "+inputPath);
-        
+        LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();
         BlockFilteringAdvanced bf = new BlockFilteringAdvanced();
         JavaPairRDD<Integer,IntArrayList> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
         entityIndex.cache();

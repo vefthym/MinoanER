@@ -46,7 +46,7 @@ public class BlockFilteringAdvanced {
     }
     
     //resulting key:blockID, value:entityIds array                            
-    private JavaPairRDD<Integer,IntArrayList> parseBlockCollection(JavaRDD<String> blockingInput) {
+    public JavaPairRDD<Integer,IntArrayList> parseBlockCollection(JavaRDD<String> blockingInput) {
         System.out.println("Parsing the blocking collection...");
         return blockingInput
             .map(line -> line.split("\t")) //split to [blockId, [entityIds]]

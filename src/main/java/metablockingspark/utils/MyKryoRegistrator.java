@@ -16,10 +16,8 @@
 package metablockingspark.utils;
 
 import com.esotericsoftware.kryo.Kryo;
-import com.esotericsoftware.kryo.serializers.DefaultSerializers.ClassSerializer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.apache.hadoop.io.VIntWritable;
 import org.apache.spark.serializer.KryoRegistrator;
 
 /**
@@ -35,9 +33,9 @@ public class MyKryoRegistrator implements KryoRegistrator {
         kryo.register(Class.class/*, new ClassSerializer()*/); 
         kryo.register(Object.class);
         kryo.register(Object[].class);
-        kryo.register(VIntWritable.class);
-        kryo.register(VIntWritable[].class);
-        kryo.register(VIntArrayWritable.class);
+        //kryo.register(VIntWritable.class);
+        //kryo.register(VIntWritable[].class);
+        //kryo.register(VIntArrayWritable.class);
         try {
             kryo.register(Class.forName("scala.reflect.ClassTag$$anon$1"));
             kryo.register(Class.forName("scala.reflect.ManifestFactory$$anon$2"));

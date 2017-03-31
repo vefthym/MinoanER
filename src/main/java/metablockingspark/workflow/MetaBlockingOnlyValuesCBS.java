@@ -18,11 +18,9 @@ package metablockingspark.workflow;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
-import java.util.Arrays;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import metablockingspark.entityBased.EntityBasedCNPCBS;
-import metablockingspark.preprocessing.BlockFiltering;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
 import metablockingspark.utils.Utils;
@@ -63,38 +61,13 @@ public class MetaBlockingOnlyValuesCBS {
             try {                                
                 Utils.deleteHDFSPath(outputPath);
             } catch (IOException | URISyntaxException ex) {
-                Logger.getLogger(BlockFiltering.class.getName()).log(Level.SEVERE, null, ex);
+                Logger.getLogger(MetaBlockingOnlyValuesCBS.class.getName()).log(Level.SEVERE, null, ex);
             }
         }
-        
-        //tuning params
-        final int NUM_CORES_IN_CLUSTER = 152; //152 in ISL cluster, 28 in okeanos cluster
-        final int NUM_WORKERS = 4; //4 in ISL cluster, 14 in okeanos cluster
-        final int NUM_EXECUTORS = NUM_WORKERS * 3;
-        final int NUM_EXECUTOR_CORES = NUM_CORES_IN_CLUSTER/NUM_EXECUTORS;
-        final int PARALLELISM = NUM_EXECUTORS * NUM_EXECUTOR_CORES * 3; //spark tuning documentation suggests 2 or 3, unless OOM error (in that case more)
-                       
-        SparkSession spark = SparkSession.builder()
-            .appName("MetaBlocking CBS only values on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1)) 
-            .config("spark.sql.warehouse.dir", tmpPath)
-            .config("spark.eventLog.enabled", true)
-            .config("spark.default.parallelism", PARALLELISM) //x tasks for each core --> x "reduce" rounds
-            .config("spark.rdd.compress", true)
-            .config("spark.network.timeout", "600s")
-            .config("spark.executor.heartbeatInterval", "20s")    
-                
-            .config("spark.executor.instances", NUM_EXECUTORS)
-            .config("spark.executor.cores", NUM_EXECUTOR_CORES)
-            .config("spark.executor.memory", "60G")            
-                
-            .config("spark.driver.maxResultSize", "2g")
-                
-            .getOrCreate();
-        
-        
-        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());        
-        LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();
-        
+        String appName = "MetaBlocking CBS only values on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1);
+        SparkSession spark = Utils.setUpSpark(appName, 3, tmpPath);
+        int PARALLELISM = spark.sparkContext().getConf().getInt("spark.default.parallelism", 152);        
+        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext()); 
         
         
         ////////////////////////
@@ -103,7 +76,7 @@ public class MetaBlockingOnlyValuesCBS {
         
         //Block Filtering
         System.out.println("\n\nStarting BlockFiltering, reading from "+inputPath);
-        
+        LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();
         BlockFilteringAdvanced bf = new BlockFilteringAdvanced();
         JavaPairRDD<Integer,IntArrayList> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
         entityIndex.cache();        

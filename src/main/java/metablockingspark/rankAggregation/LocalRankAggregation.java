@@ -38,7 +38,7 @@ public class LocalRankAggregation implements Serializable {
      * @return the top-1 aggregate candidate match per entity
      */
     public JavaPairRDD<Integer,Integer> getTopCandidatePerEntity(JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates) {
-        return topKValueCandidates
+        return topKValueCandidates                
                 .mapValues(x -> {
                     Map<Integer, Float> rankedCandidates = new HashMap<>();
                     //sort by descending value sim
@@ -46,14 +46,23 @@ public class LocalRankAggregation implements Serializable {
                        rankedCandidates.put(entry.getKey(), entry.getValue());
                     }                    
                     return new IntArrayList(Utils.sortByValue(rankedCandidates, true).keySet());
-                })
+                })                
                 .fullOuterJoin(topKNeighborCandidates)
-                .mapValues(x -> top1Borda(x));                
+                .mapValues(x -> top1Borda(x))
+                .filter((x -> x._2() != null));
     }
     
     public Integer top1Borda(Tuple2<Optional<IntArrayList>, Optional<IntArrayList>> lists) {
         IntArrayList list1 = lists._1().orNull();
         IntArrayList list2 = lists._2().orNull();
+        
+        //still don't know why those empty checks are needed...
+        if (list1 != null && list1.isEmpty()) {
+            list1 = null;
+        }
+        if (list2 != null && list2.isEmpty()) {
+            list2 = null;
+        }
         
         if (list1 == null && list2 == null) {
             return null;

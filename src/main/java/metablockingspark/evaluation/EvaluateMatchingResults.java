@@ -15,7 +15,12 @@
  */
 package metablockingspark.evaluation;
 
+import java.io.IOException;
+import java.net.URISyntaxException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import metablockingspark.utils.Utils;
+import metablockingspark.workflow.FullMetaBlockingWorkflow;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.SparkSession;
@@ -87,61 +92,35 @@ public class EvaluateMatchingResults {
             resultsPath = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testInput";  
             groundTruthPath = "";            
             groundTruthOutputPath = ""; 
-        } else if (args.length == 5) {            
+        } else if (args.length == 4) {            
             tmpPath = "/file:/tmp";
             //master = "spark://master:7077";
             entityIds1 = args[0];
             entityIds2 = args[1];
             resultsPath = args[2];
             groundTruthPath = args[3];
-            groundTruthOutputPath = args[4];
+            groundTruthOutputPath = groundTruthPath+"_ids";
+            
+            // delete existing output directories
+            try {                                
+                Utils.deleteHDFSPath(groundTruthOutputPath);
+            } catch (IOException | URISyntaxException ex) {
+                Logger.getLogger(FullMetaBlockingWorkflow.class.getName()).log(Level.SEVERE, null, ex);
+            }
         } else {
             System.out.println("You can run match evaluation with the following arguments:"
                     + "0: entityIds1"
                     + "1: entityIds2"
-                    + "2: results path"
-                    + "3: ground truth path"
-                    + "4: ground truth output path");
+                    + "2: matching results path"
+                    + "3: ground truth path");
             return;
         }
-                       
-        //tuning params
-        final int NUM_CORES_IN_CLUSTER = 152; //152 in ISL cluster, 28 in okeanos cluster
-        final int NUM_WORKERS = 4; //4 in ISL cluster, 14 in okeanos cluster
-        final int NUM_EXECUTORS = NUM_WORKERS * 3;
-        final int NUM_EXECUTOR_CORES = NUM_CORES_IN_CLUSTER/NUM_EXECUTORS;
-        final int PARALLELISM = NUM_EXECUTORS * NUM_EXECUTOR_CORES * 2; //spark tuning documentation suggests 2 or 3, unless OOM error (in that case more)
-                       
-        SparkSession spark = SparkSession.builder()
-            .appName("Evaluation of "+resultsPath.substring(resultsPath.lastIndexOf("/", resultsPath.length()-2)+1)) 
-            .config("spark.sql.warehouse.dir", tmpPath)
-            .config("spark.eventLog.enabled", true)
-            .config("spark.default.parallelism", PARALLELISM) //x tasks for each core --> x "reduce" rounds
-            .config("spark.rdd.compress", true)
-            .config("spark.network.timeout", "600s")
-            .config("spark.executor.heartbeatInterval", "20s")    
-                
-            .config("spark.executor.instances", NUM_EXECUTORS)
-            .config("spark.executor.cores", NUM_EXECUTOR_CORES)
-            .config("spark.executor.memory", "60G")
-            //.config("spark.driver.memory", "10g") //not working
-            
-            //memory configurations (deprecated)
-                /*
-            .config("spark.memory.useLegacyMode", true)
-            .config("spark.shuffle.memoryFraction", 0.4)
-            .config("spark.storage.memoryFraction", 0.4) 
-            .config("spark.memory.fraction", 0.8)
-                */
-            //.config("spark.memory.offHeap.enabled", true)
-            //.config("spark.memory.offHeap.size", "10g")
-                
-            .config("spark.driver.maxResultSize", "2g")
-            
-            .getOrCreate();        
+                    
         
-        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());                
-        
+        String appName = "Evaluation of "+resultsPath.substring(resultsPath.lastIndexOf("/", resultsPath.length()-2)+1);
+        SparkSession spark = Utils.setUpSpark(appName, 3, tmpPath);
+        int PARALLELISM = spark.sparkContext().getConf().getInt("spark.default.parallelism", 152);        
+        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext()); 
         
         ////////////////////////
         //start the processing//
@@ -150,11 +129,14 @@ public class EvaluateMatchingResults {
         System.out.println("Starting the evaluation...");             
         
         String GT_SEPARATOR = ",";
+        if (groundTruthPath.contains("music")) {
+            GT_SEPARATOR = " ";
+        }
         
         //load the results
         JavaPairRDD<Integer,Integer> matches = jsc.textFile(resultsPath, PARALLELISM)
                 .mapToPair(line -> {
-                    String[] result = line.substring(1,line.length()-1).split(","); //lose ( and ) and split by comma
+                    String[] result = line.substring(1,line.length()-1).split(","); //lose '(' and ')' and split by comma
                     return new Tuple2<>(Integer.parseInt(result[0]),Integer.parseInt(result[1]));
                 });
         
@@ -168,7 +150,7 @@ public class EvaluateMatchingResults {
         gt.cache();
         gt.saveAsTextFile(groundTruthOutputPath);
         
-        System.out.println("Finished loading the ground truth, now evaluating the results...");   
+        System.out.println("Finished loading the ground truth with "+ gt.count()+" matches, now evaluating the results...");
         
         evaluation.evaluateResults(matches, gt, TPs, FPs, FNs);
         System.out.println("Evaluation finished successfully.");

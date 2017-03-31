@@ -16,12 +16,11 @@
 
 package metablockingspark.preprocessing;
 
+import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import java.io.Serializable;
-import java.util.Map;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
-import org.apache.spark.storage.StorageLevel;
 import scala.Tuple2;
 
 /**
@@ -31,6 +30,7 @@ import scala.Tuple2;
 public class EntityWeightsWJS implements Serializable {
     
     private long numPositiveEntities, numNegativeEntities;
+    private Int2IntOpenHashMap blockSizesMap;
 
     public EntityWeightsWJS() {
         numNegativeEntities = 0;
@@ -45,18 +45,27 @@ public class EntityWeightsWJS implements Serializable {
         return numNegativeEntities;
     }
     
+    public Int2IntOpenHashMap getBlockSizesMap() {
+        return blockSizesMap;
+    }
+    
+    /**
+     * Returns the total weight of each entity (i.e., the sum of its tokens' weights).
+     * @param blocksFromEI the blocks after block filtering, in the form: blockId, [entityIds]
+     * @param entityIndex the entity index after block filtering, in the form: entityId, [blockIds]
+     * @return the total weight of each entity (i.e., the sum of its tokens' weights)
+     */
     public JavaPairRDD<Integer, Float> getWeights(JavaPairRDD<Integer, IntArrayList> blocksFromEI, JavaPairRDD<Integer,IntArrayList> entityIndex) {
         JavaRDD<Integer> entityIds = entityIndex.keys().cache();
         
         System.out.println("Getting blocksFromEI as a Map...");        
-        Map<Integer, Integer> blockSizesMap = blocksFromEI
+        blockSizesMap = new Int2IntOpenHashMap(blocksFromEI
                 .mapValues(x -> x.size())                
-                .collectAsMap();
+                .collectAsMap());
         
-        Map<Integer, Integer> numNegativeEntitiesInBlock = 
-                blocksFromEI
+        Int2IntOpenHashMap numNegativeEntitiesInBlock = new Int2IntOpenHashMap(blocksFromEI
                 .mapValues(x -> (int)x.stream().filter(eId->eId<0).count())
-                .collectAsMap();
+                .collectAsMap());
         
         
         System.out.println("Counting positive and negative entities...");
@@ -71,8 +80,8 @@ public class EntityWeightsWJS implements Serializable {
             float totalWeight = 0;            
             if (entityId < 0) {
                 for (int block : associatedBlocks) {                    
-                    Integer df2t = numNegativeEntitiesInBlock.get(block);
-                    if (df2t == null) {
+                    int df2t = numNegativeEntitiesInBlock.getOrDefault(block, -1);                    
+                    if (df2t == -1) {
                         continue;
                     }                    
                     float weight2 = (float) Math.log10((double) numNegativeEntities / df2t); //IDF                    
@@ -80,12 +89,12 @@ public class EntityWeightsWJS implements Serializable {
                 }
             } else {
                 for (int block : associatedBlocks) {                    
-                    Integer blockSize = blockSizesMap.get(block);
-                    if (blockSize == null) {
+                    int blockSize = blockSizesMap.getOrDefault(block, -1);
+                    if (blockSize == -1) {
                         continue;
                     }
-                    Integer negativesInBlock = numNegativeEntitiesInBlock.get(block);
-                    if (negativesInBlock == null) {
+                    int negativesInBlock = numNegativeEntitiesInBlock.getOrDefault(block, -1);
+                    if (negativesInBlock == -1) {
                         continue;
                     }
                     int df1t = blockSize - negativesInBlock;                    

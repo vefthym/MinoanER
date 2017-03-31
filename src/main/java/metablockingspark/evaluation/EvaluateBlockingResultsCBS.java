@@ -15,27 +15,21 @@
  */
 package metablockingspark.evaluation;
 
-import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
-import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighbors;
+import metablockingspark.entityBased.EntityBasedCNPCBS;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
-import metablockingspark.preprocessing.EntityWeightsWJS;
 import metablockingspark.utils.Utils;
 import metablockingspark.workflow.FullMetaBlockingWorkflow;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.util.LongAccumulator;
 import scala.Tuple2;
@@ -44,7 +38,7 @@ import scala.Tuple2;
  *
  * @author vefthym
  */
-public class EvaluateBlockingResults extends BlockingEvaluation {
+public class EvaluateBlockingResultsCBS extends BlockingEvaluation {
     
     public static void main(String[] args) {
         String tmpPath;        
@@ -62,7 +56,7 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
             entityIds2 = "";
             groundTruthPath = ""; 
             groundTruthOutputPath = "";
-        } else if (args.length == 4) {            
+        } else if (args.length == 6) {            
             tmpPath = "/file:/tmp";
             //master = "spark://master:7077";
             inputPath = args[0];            
@@ -79,17 +73,22 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
             }
         } else {
             System.out.println("You can run Metablocking with the following arguments:\n"
-                    + "0: inputBlocking\n"                    
-                    + "1: entityIds1: entityUrl\tentityId (positive)\n"
-                    + "2: entityIds2: entityUrl\tentityId (also positive)\n"
-                    + "3: ground truth Path\n");
+                    + "0: inputBlocking\n"
+                    + "1: inputTriples1 (raw rdf triples)\n"
+                    + "2: inputTriples2 (raw rdf triples)\n"
+                    + "3: entityIds1: entityUrl\tentityId (positive)\n"
+                    + "4: entityIds2: entityUrl\tentityId (also positive)\n"
+                    + "5: ground truth Path\n");
             return;
         }
                        
-        String appName = "WJS Blocking evaluation on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1);
+        //tuning params
+        String appName = "CBS Blocking evaluation on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1);
         SparkSession spark = Utils.setUpSpark(appName, 3, tmpPath);
-        int PARALLELISM = spark.sparkContext().getConf().getInt("spark.default.parallelism", 152);        
-        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext()); 
+        int PARALLELISM = spark.sparkContext().getConf().getInt("spark.default.parallelism", 152);
+        
+        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());        
+        LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();
         
         
         ////////////////////////
@@ -98,7 +97,7 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
         
         //Block Filtering
         System.out.println("\n\nStarting BlockFiltering, reading from "+inputPath);
-        LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();
+        
         BlockFilteringAdvanced bf = new BlockFilteringAdvanced();
         JavaPairRDD<Integer,IntArrayList> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
         entityIndex.setName("entityIndex");
@@ -116,19 +115,8 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
         
         BlocksFromEntityIndex bFromEI = new BlocksFromEntityIndex();
         JavaPairRDD<Integer, IntArrayList> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
-        blocksFromEI.setName("blocksFromEI");
-        //blocksFromEI.persist(StorageLevel.DISK_ONLY());
+        blocksFromEI.setName("blocksFromEI");        
         blocksFromEI.cache(); //a few hundreds MBs
-        
-        
-        //get the total weights of each entity, required by WJS weigthing scheme (only)        
-        System.out.println("\n\nStarting EntityWeightsWJS...");
-        EntityWeightsWJS wjsWeights = new EntityWeightsWJS();        
-        Int2FloatOpenHashMap totalWeights = new Int2FloatOpenHashMap(wjsWeights.getWeights(blocksFromEI, entityIndex).collectAsMap()); //action
-        Broadcast<Int2FloatOpenHashMap> totalWeights_BV = jsc.broadcast(totalWeights);
-//        
-//        Int2IntOpenHashMap blockSizes = wjsWeights.getBlockSizesMap();
-//        Broadcast<Int2IntOpenHashMap> blockSizes_BV = jsc.broadcast(blockSizes);        
         
         blocksFromEI.count(); //dummy action (only in CBS)
         long numEntities = entityIndex.count();
@@ -143,28 +131,18 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
         
         entityIndex.unpersist();
         
-        
-        long numNegativeEntities = wjsWeights.getNumNegativeEntities();
-        long numPositiveEntities = wjsWeights.getNumPositiveEntities();
-        
-        System.out.println("Found "+numNegativeEntities+" negative entities");
-        System.out.println("Found "+numPositiveEntities+" positive entities");
-        
-        
         //CNP
         System.out.println("\n\nStarting CNP...");        
-                
-        System.out.println("Getting the top K value candidates...");
-        EntityBasedCNPNeighbors cnp = new EntityBasedCNPNeighbors();        
-        JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);        
+        
+        //CBS
+        EntityBasedCNPCBS cnp = new EntityBasedCNPCBS();
+        JavaPairRDD<Integer,IntArrayList> topKValueCandidates = cnp.run(blocksFromEI, K);        
         
         JavaPairRDD<Integer,IntArrayList> negativeIdResults = topKValueCandidates
-                .filter(x-> x._1() < 0)
-                .mapValues(x -> new IntArrayList(x.keySet()));
+                .filter(x-> x._1() < 0);
         
         JavaPairRDD<Integer, IntArrayList> positiveIdResults = topKValueCandidates
-                .filter(x-> x._1() >= 0)
-                .mapValues(x -> new IntArrayList(x.keySet()))
+                .filter(x-> x._1() >= 0)                
                 .flatMapToPair(x -> {
                     List<Tuple2<Integer,Integer>> candidates = new ArrayList<>();
                     for (int candidate : x._2()) {
@@ -187,16 +165,16 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
                     return new IntArrayList(resultSet);
                 });
         
+        System.out.println("Getting the top K value candidates...");               
         
-        blocksFromEI.unpersist();    
-        
+        blocksFromEI.unpersist();            
         
         
         //Start the evaluation        
         LongAccumulator TPs = jsc.sc().longAccumulator("TPs");
         LongAccumulator FPs = jsc.sc().longAccumulator("FPs");
         LongAccumulator FNs = jsc.sc().longAccumulator("FNs");
-        EvaluateBlockingResults evaluation = new EvaluateBlockingResults();
+        EvaluateBlockingResultsCBS evaluation = new EvaluateBlockingResultsCBS();
         
         String GT_SEPARATOR = ",";
         if (groundTruthPath.contains("music")) {
@@ -211,7 +189,8 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
         
         evaluation.evaluateBlockingResults(valueResults, gt, TPs, FPs, FNs);
         System.out.println("Evaluation finished successfully.");
-        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
+        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());           
+        
         
         spark.stop();
     }

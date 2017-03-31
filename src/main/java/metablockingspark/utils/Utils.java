@@ -26,15 +26,13 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.stream.Collectors;
-import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighbors;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
+import org.apache.spark.sql.SparkSession;
 import scala.Tuple2;
 
 /**
@@ -158,7 +156,40 @@ public class Utils {
                     String [] parts = line.split(GT_SEPARATOR);
                     return new Tuple2<>(-entityIds2.getOrDefault(parts[1], 1), //negative id first
                                         entityIds1.getOrDefault(parts[0], -1)); //positive id second
-                });
+                })
+                .filter(x-> x._1() != 1 && x._2() != -1);
+    }
+    
+    /**
+     * Sets up a new SparkSession
+     * @param appName
+     * @param parallelismFactor spark tuning documentation suggests 2 or 3, unless OOM error (in that case more)
+     * @param tmpPath
+     * @return 
+     */
+    public static SparkSession setUpSpark(String appName, int parallelismFactor, String tmpPath) {
+        final int NUM_CORES_IN_CLUSTER = 152; //152 in ISL cluster, 28 in okeanos cluster
+        final int NUM_WORKERS = 4; //4 in ISL cluster, 14 in okeanos cluster
+        final int NUM_EXECUTORS = NUM_WORKERS * 3;
+        final int NUM_EXECUTOR_CORES = NUM_CORES_IN_CLUSTER/NUM_EXECUTORS;
+        final int PARALLELISM = NUM_EXECUTORS * NUM_EXECUTOR_CORES * parallelismFactor; //spark tuning documentation suggests 2 or 3, unless OOM error (in that case more)
+                       
+        return SparkSession.builder()
+            .appName(appName) 
+            .config("spark.sql.warehouse.dir", tmpPath)
+            .config("spark.eventLog.enabled", true)
+            .config("spark.default.parallelism", PARALLELISM) //x tasks for each core --> x "reduce" rounds
+            .config("spark.rdd.compress", true)
+            .config("spark.network.timeout", "600s")
+            .config("spark.executor.heartbeatInterval", "20s")    
+                
+            .config("spark.executor.instances", NUM_EXECUTORS)
+            .config("spark.executor.cores", NUM_EXECUTOR_CORES)
+            .config("spark.executor.memory", "60G")
+            
+            .config("spark.driver.maxResultSize", "2g")
+            
+            .getOrCreate();        
     }
     
 }

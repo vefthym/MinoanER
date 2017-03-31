@@ -16,14 +16,11 @@
 package metablockingspark.evaluation;
 
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
-import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighbors;
@@ -44,12 +41,13 @@ import scala.Tuple2;
  *
  * @author vefthym
  */
-public class EvaluateBlockingResults extends BlockingEvaluation {
+public class EvaluateBlockingResultsNeighbors extends BlockingEvaluation {
     
     public static void main(String[] args) {
         String tmpPath;        
         String inputPath;      
-        String groundTruthPath, groundTruthOutputPath;        
+        String groundTruthPath, groundTruthOutputPath;
+        String inputTriples1, inputTriples2;
         String entityIds1, entityIds2;
         
         
@@ -57,18 +55,22 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
             System.setProperty("hadoop.home.dir", "C:\\Users\\VASILIS\\Documents\\hadoop_home"); //only for local mode
             
             tmpPath = "/file:C:\\tmp";            
-            inputPath = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testInput";              
+            inputPath = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testInput";  
+            inputTriples1 = "";
+            inputTriples2 = "";
             entityIds1 = "";
             entityIds2 = "";
             groundTruthPath = ""; 
             groundTruthOutputPath = "";
-        } else if (args.length == 4) {            
+        } else if (args.length == 6) {            
             tmpPath = "/file:/tmp";
             //master = "spark://master:7077";
-            inputPath = args[0];            
-            entityIds1 = args[1];
-            entityIds2 = args[2];
-            groundTruthPath = args[3];
+            inputPath = args[0];
+            inputTriples1 = args[1];
+            inputTriples2 = args[2];
+            entityIds1 = args[3];
+            entityIds2 = args[4];
+            groundTruthPath = args[5];
             groundTruthOutputPath = groundTruthPath+"_ids";
             
             // delete existing output directories
@@ -79,18 +81,19 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
             }
         } else {
             System.out.println("You can run Metablocking with the following arguments:\n"
-                    + "0: inputBlocking\n"                    
-                    + "1: entityIds1: entityUrl\tentityId (positive)\n"
-                    + "2: entityIds2: entityUrl\tentityId (also positive)\n"
-                    + "3: ground truth Path\n");
+                    + "0: inputBlocking\n"
+                    + "1: inputTriples1 (raw rdf triples)\n"
+                    + "2: inputTriples2 (raw rdf triples)\n"
+                    + "3: entityIds1: entityUrl\tentityId (positive)\n"
+                    + "4: entityIds2: entityUrl\tentityId (also positive)\n"
+                    + "5: ground truth Path\n");
             return;
         }
-                       
-        String appName = "WJS Blocking evaluation on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1);
+        
+        String appName = "WJS Neighbor Blocking evaluation on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1);
         SparkSession spark = Utils.setUpSpark(appName, 3, tmpPath);
         int PARALLELISM = spark.sparkContext().getConf().getInt("spark.default.parallelism", 152);        
-        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext()); 
-        
+        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());        
         
         ////////////////////////
         //start the processing//
@@ -101,39 +104,28 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
         LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();
         BlockFilteringAdvanced bf = new BlockFilteringAdvanced();
         JavaPairRDD<Integer,IntArrayList> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
-        entityIndex.setName("entityIndex");
-        entityIndex.cache();
-        //entityIndex.persist(StorageLevel.DISK_ONLY_2()); //store to disk with replication factor 2
+        entityIndex.setName("entityIndex").cache();
         
-        
-        //long numEntities = entityIndex.keys().count();
         
         //Blocks From Entity Index
-        System.out.println("\n\nStarting BlocksFromEntityIndex...");
-                
+        System.out.println("\n\nStarting BlocksFromEntityIndex...");                
         LongAccumulator CLEAN_BLOCK_ACCUM = jsc.sc().longAccumulator();
-        LongAccumulator NUM_COMPARISONS_ACCUM = jsc.sc().longAccumulator();
-        
+        LongAccumulator NUM_COMPARISONS_ACCUM = jsc.sc().longAccumulator();        
         BlocksFromEntityIndex bFromEI = new BlocksFromEntityIndex();
         JavaPairRDD<Integer, IntArrayList> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
-        blocksFromEI.setName("blocksFromEI");
-        //blocksFromEI.persist(StorageLevel.DISK_ONLY());
-        blocksFromEI.cache(); //a few hundreds MBs
+        blocksFromEI.setName("blocksFromEI").cache(); //a few hundred MBs
         
         
-        //get the total weights of each entity, required by WJS weigthing scheme (only)        
+        //get the total weights of each entity, required by WJS weigthing scheme (only)
         System.out.println("\n\nStarting EntityWeightsWJS...");
         EntityWeightsWJS wjsWeights = new EntityWeightsWJS();        
-        Int2FloatOpenHashMap totalWeights = new Int2FloatOpenHashMap(wjsWeights.getWeights(blocksFromEI, entityIndex).collectAsMap()); //action
-        Broadcast<Int2FloatOpenHashMap> totalWeights_BV = jsc.broadcast(totalWeights);
-//        
-//        Int2IntOpenHashMap blockSizes = wjsWeights.getBlockSizesMap();
-//        Broadcast<Int2IntOpenHashMap> blockSizes_BV = jsc.broadcast(blockSizes);        
+        Int2FloatOpenHashMap totalWeights = new Int2FloatOpenHashMap();
+        wjsWeights.getWeights(blocksFromEI, entityIndex).foreach(entry -> {
+            totalWeights.put(entry._1().intValue(), entry._2().floatValue()); //without unboxing it calls a deprecated method, ignore warning
+        });
+        Broadcast<Int2FloatOpenHashMap> totalWeights_BV = jsc.broadcast(totalWeights);        
         
-        blocksFromEI.count(); //dummy action (only in CBS)
-        long numEntities = entityIndex.count();
-        
-        double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / numEntities; //BCin = average number of block assignments per entity
+        double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
         final int K = ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
         System.out.println(BLOCK_ASSIGNMENTS_ACCUM.value()+" block assignments");
         System.out.println(CLEAN_BLOCK_ACCUM.value()+" clean blocks");
@@ -143,28 +135,40 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
         
         entityIndex.unpersist();
         
-        
         long numNegativeEntities = wjsWeights.getNumNegativeEntities();
-        long numPositiveEntities = wjsWeights.getNumPositiveEntities();
-        
+        long numPositiveEntities = wjsWeights.getNumPositiveEntities();        
         System.out.println("Found "+numNegativeEntities+" negative entities");
         System.out.println("Found "+numPositiveEntities+" positive entities");
         
-        
         //CNP
-        System.out.println("\n\nStarting CNP...");        
-                
+        System.out.println("\n\nStarting CNP...");
+        String SEPARATOR = (inputTriples1.endsWith(".tsv"))? "\t" : " ";        
+        final float MIN_SUPPORT_THRESHOLD = 0.01f;
+        final int N = 3; //for top-N neighbors
+        
         System.out.println("Getting the top K value candidates...");
         EntityBasedCNPNeighbors cnp = new EntityBasedCNPNeighbors();        
-        JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);        
+        JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
         
-        JavaPairRDD<Integer,IntArrayList> negativeIdResults = topKValueCandidates
-                .filter(x-> x._1() < 0)
-                .mapValues(x -> new IntArrayList(x.keySet()));
+        blocksFromEI.unpersist();        
         
-        JavaPairRDD<Integer, IntArrayList> positiveIdResults = topKValueCandidates
-                .filter(x-> x._1() >= 0)
-                .mapValues(x -> new IntArrayList(x.keySet()))
+        System.out.println("Getting the top K neighbor candidates...");
+        JavaPairRDD<Integer, IntArrayList> topkNeighborCandidates = cnp.run(
+                topKValueCandidates, 
+                jsc.textFile(inputTriples1, PARALLELISM), 
+                jsc.textFile(inputTriples2, PARALLELISM), 
+                SEPARATOR, 
+                jsc.textFile(entityIds1),
+                jsc.textFile(entityIds2),
+                MIN_SUPPORT_THRESHOLD, K, N, 
+                jsc);
+        
+        
+        JavaPairRDD<Integer,IntArrayList> negativeIdResults = topkNeighborCandidates
+                .filter(x-> x._1() < 0);
+        
+        JavaPairRDD<Integer, IntArrayList> positiveIdResults = topkNeighborCandidates
+                .filter(x-> x._1() >= 0)                
                 .flatMapToPair(x -> {
                     List<Tuple2<Integer,Integer>> candidates = new ArrayList<>();
                     for (int candidate : x._2()) {
@@ -177,7 +181,7 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
                         (x,y) -> {x.addAll(y); return x;})
                 .mapValues(x-> new IntArrayList(x));
         
-        JavaPairRDD<Integer,IntArrayList> valueResults = 
+        JavaPairRDD<Integer,IntArrayList> neighborResults = 
                 negativeIdResults.fullOuterJoin(positiveIdResults)
                 .mapValues(x-> {
                     IntArrayList list1 = x._1().orElse(new IntArrayList());
@@ -188,15 +192,11 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
                 });
         
         
-        blocksFromEI.unpersist();    
-        
-        
-        
         //Start the evaluation        
         LongAccumulator TPs = jsc.sc().longAccumulator("TPs");
         LongAccumulator FPs = jsc.sc().longAccumulator("FPs");
         LongAccumulator FNs = jsc.sc().longAccumulator("FNs");
-        EvaluateBlockingResults evaluation = new EvaluateBlockingResults();
+        EvaluateBlockingResultsNeighbors evaluation = new EvaluateBlockingResultsNeighbors();
         
         String GT_SEPARATOR = ",";
         if (groundTruthPath.contains("music")) {
@@ -209,7 +209,7 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
         
         System.out.println("Finished loading the ground truth with "+ gt.count()+" matches, now evaluating the results...");  
         
-        evaluation.evaluateBlockingResults(valueResults, gt, TPs, FPs, FNs);
+        evaluation.evaluateBlockingResults(neighborResults, gt, TPs, FPs, FNs);
         System.out.println("Evaluation finished successfully.");
         EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
         

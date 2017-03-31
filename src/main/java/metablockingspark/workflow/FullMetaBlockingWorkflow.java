@@ -89,51 +89,12 @@ public class FullMetaBlockingWorkflow {
                     + "5: outputPath");
             return;
         }
-                       
-        //tuning params
-        final int NUM_CORES_IN_CLUSTER = 152; //152 in ISL cluster, 28 in okeanos cluster
-        final int NUM_WORKERS = 4; //4 in ISL cluster, 14 in okeanos cluster
-        final int NUM_EXECUTORS = NUM_WORKERS * 3;
-        final int NUM_EXECUTOR_CORES = NUM_CORES_IN_CLUSTER/NUM_EXECUTORS;
-        final int PARALLELISM = NUM_EXECUTORS * NUM_EXECUTOR_CORES * 3; //spark tuning documentation suggests 2 or 3, unless OOM error (in that case more)
-                       
-        SparkSession spark = SparkSession.builder()
-            .appName("FullMetaBlocking WJS on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1)) 
-            .config("spark.sql.warehouse.dir", tmpPath)
-            .config("spark.eventLog.enabled", true)
-            .config("spark.default.parallelism", PARALLELISM) //x tasks for each core --> x "reduce" rounds
-            .config("spark.rdd.compress", true)
-            .config("spark.network.timeout", "600s")
-            .config("spark.executor.heartbeatInterval", "20s")    
-                
-            .config("spark.executor.instances", NUM_EXECUTORS)
-            .config("spark.executor.cores", NUM_EXECUTOR_CORES)
-            .config("spark.executor.memory", "60G")
-            //.config("spark.driver.memory", "10g") //not working
-            
-            //memory configurations (deprecated)
-                /*
-            .config("spark.memory.useLegacyMode", true)
-            .config("spark.shuffle.memoryFraction", 0.4)
-            .config("spark.storage.memoryFraction", 0.4) 
-            .config("spark.memory.fraction", 0.8)
-                */
-            //.config("spark.memory.offHeap.enabled", true)
-            //.config("spark.memory.offHeap.size", "10g")
-                
-            .config("spark.driver.maxResultSize", "2g")
-            
-            //un-comment the following for Kryo serializer (does not seem to improve compression, only speed)            
-            /*
-            .config("spark.kryo.registrator", MyKryoRegistrator.class.getName())
-            .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-            .config("spark.kryo.registrationRequired", true) //just to be safe that everything is serialized as it should be (otherwise runtime error)
-            */
-            .getOrCreate();        
         
-        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());        
-        LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();
-        
+        String appName = "FullMetaBlocking WJS on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1);
+        SparkSession spark = Utils.setUpSpark(appName, 3, tmpPath);
+        int PARALLELISM = spark.sparkContext().getConf().getInt("spark.default.parallelism", 152);        
+        JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext()); 
+                       
         
         ////////////////////////
         //start the processing//
@@ -141,33 +102,25 @@ public class FullMetaBlockingWorkflow {
         
         //Block Filtering
         System.out.println("\n\nStarting BlockFiltering, reading from "+inputPath);
-        
+        LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();
         BlockFilteringAdvanced bf = new BlockFilteringAdvanced();
         JavaPairRDD<Integer,IntArrayList> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
-        entityIndex.setName("entityIndex");
-        entityIndex.cache();
-        //entityIndex.persist(StorageLevel.DISK_ONLY_2()); //store to disk with replication factor 2
+        entityIndex.setName("entityIndex").cache();
         
-        
-        //long numEntities = entityIndex.keys().count();
         
         //Blocks From Entity Index
-        System.out.println("\n\nStarting BlocksFromEntityIndex...");
-                
+        System.out.println("\n\nStarting BlocksFromEntityIndex...");                
         LongAccumulator CLEAN_BLOCK_ACCUM = jsc.sc().longAccumulator();
-        LongAccumulator NUM_COMPARISONS_ACCUM = jsc.sc().longAccumulator();
-        
+        LongAccumulator NUM_COMPARISONS_ACCUM = jsc.sc().longAccumulator();        
         BlocksFromEntityIndex bFromEI = new BlocksFromEntityIndex();
         JavaPairRDD<Integer, IntArrayList> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
-        blocksFromEI.setName("blocksFromEI");
-        //blocksFromEI.persist(StorageLevel.DISK_ONLY());
-        blocksFromEI.cache(); //a few hundreds MBs
+        blocksFromEI.setName("blocksFromEI").cache(); //a few hundred MBs
         
         
         //get the total weights of each entity, required by WJS weigthing scheme (only)
         System.out.println("\n\nStarting EntityWeightsWJS...");
         EntityWeightsWJS wjsWeights = new EntityWeightsWJS();        
-        Int2FloatOpenHashMap totalWeights = new Int2FloatOpenHashMap(); //saves memory by storing data as primitive types        
+        Int2FloatOpenHashMap totalWeights = new Int2FloatOpenHashMap();
         wjsWeights.getWeights(blocksFromEI, entityIndex).foreach(entry -> {
             totalWeights.put(entry._1().intValue(), entry._2().floatValue());
         });
@@ -184,28 +137,21 @@ public class FullMetaBlockingWorkflow {
         entityIndex.unpersist();
         
         long numNegativeEntities = wjsWeights.getNumNegativeEntities();
-        long numPositiveEntities = wjsWeights.getNumPositiveEntities();
-        
+        long numPositiveEntities = wjsWeights.getNumPositiveEntities();        
         System.out.println("Found "+numNegativeEntities+" negative entities");
         System.out.println("Found "+numPositiveEntities+" positive entities");
         
         //CNP
         System.out.println("\n\nStarting CNP...");
-        String SEPARATOR = " ";
-        if (inputTriples1.endsWith(".tsv")) {
-            SEPARATOR = "\t";
-        }
+        String SEPARATOR = (inputTriples1.endsWith(".tsv"))? "\t" : " ";        
         final float MIN_SUPPORT_THRESHOLD = 0.01f;
         final int N = 3; //for top-N neighbors
         
         System.out.println("Getting the top K value candidates...");
         EntityBasedCNPNeighbors cnp = new EntityBasedCNPNeighbors();        
         JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
-        //totalWeights_BV.unpersist();
-        //totalWeights_BV.destroy();
         
-        blocksFromEI.unpersist();
-        //topKValueCandidates.setName("topKValueCandidates").persist(StorageLevel.MEMORY_AND_DISK_SER());
+        blocksFromEI.unpersist();        
         
         System.out.println("Getting the top K neighbor candidates...");
         JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates = cnp.run(
