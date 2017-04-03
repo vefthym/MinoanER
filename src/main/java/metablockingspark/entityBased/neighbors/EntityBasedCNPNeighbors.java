@@ -72,8 +72,8 @@ public class EntityBasedCNPNeighbors implements Serializable {
         Broadcast<Map<Integer,IntArrayList>> inNeighbors_BV = jsc.broadcast(inNeighbors);
         
         //JavaPairRDD<Tuple2<Integer, Integer>, Float> neighborSims = getNeighborSims(topKvalueCandidates, inNeighbors_BV);        
-        //JavaPairRDD<Integer, IntArrayList> topKneighborCandidates =  getTopKNeighborSims(neighborSims, K);        
-        JavaPairRDD<Integer, IntArrayList> topKneighborCandidates =  getTopKNeighborSimsNEW(topKvalueCandidates, inNeighbors_BV, K);        
+        //JavaPairRDD<Integer, IntArrayList> topKneighborCandidates =  getTopKNeighborSimsOld(neighborSims, K);        
+        JavaPairRDD<Integer, IntArrayList> topKneighborCandidates =  getTopKNeighborSims(topKvalueCandidates, inNeighbors_BV, K);        
         return topKneighborCandidates;
     }
     
@@ -146,12 +146,13 @@ public class EntityBasedCNPNeighbors implements Serializable {
     
     
     /**
+     * @deprecated Not needed in the new implementation. Kept, in case it will be useful in the future. 
      * Returns the neighborSim of each entity pair. 
      * @param valueSims an RDD with the top-K value sims for each entity, in the form key: eid, value: (candidateMatch cId, value_sim(eId,cId))
      * @param inNeighbors_BV
      * @return the neighborSim of each entity pair, where entity pair is the key and neighborSim is the value
      */
-    public JavaPairRDD<Tuple2<Integer, Integer>, Float> getNeighborSims(JavaPairRDD<Integer,Int2FloatOpenHashMap> valueSims, Broadcast<Map<Integer,IntArrayList>> inNeighbors_BV) {
+    private JavaPairRDD<Tuple2<Integer, Integer>, Float> getNeighborSims(JavaPairRDD<Integer,Int2FloatOpenHashMap> valueSims, Broadcast<Map<Integer,IntArrayList>> inNeighbors_BV) {
        
        return valueSims.flatMapToPair(x->{
             int eId = x._1();
@@ -183,7 +184,13 @@ public class EntityBasedCNPNeighbors implements Serializable {
     }
     
     
-    public JavaPairRDD<Integer, IntArrayList> getTopKNeighborSims(JavaPairRDD<Tuple2<Integer, Integer>, Float> neighborSims, int K) {
+    /**
+     * @deprecated use {@link #getTopKNeighborSims(JavaPairRDD, Broadcast, int) }
+     * @param neighborSims
+     * @param K
+     * @return 
+     */
+    public JavaPairRDD<Integer, IntArrayList> getTopKNeighborSimsOld(JavaPairRDD<Tuple2<Integer, Integer>, Float> neighborSims, int K) {
         return neighborSims.flatMapToPair(pair -> { //for each pair (e1,e2), value_sim(e1,e2)
             List<Tuple2<Integer, Tuple2<Integer,Float>>> pairs = new ArrayList<>();
             pairs.add(new Tuple2<>(pair._1()._1(), new Tuple2<>(pair._1()._2(), pair._2()))); //emit e1, (e2,value_sim(e1,e2))
@@ -229,7 +236,7 @@ public class EntityBasedCNPNeighbors implements Serializable {
     
     
     
-    public JavaPairRDD<Integer, IntArrayList> getTopKNeighborSimsNEW (JavaPairRDD<Integer,Int2FloatOpenHashMap> valueSims, Broadcast<Map<Integer,IntArrayList>> inNeighbors_BV, int K) {
+    public JavaPairRDD<Integer, IntArrayList> getTopKNeighborSims (JavaPairRDD<Integer,Int2FloatOpenHashMap> valueSims, Broadcast<Map<Integer,IntArrayList>> inNeighbors_BV, int K) {
         return valueSims.flatMapToPair(x->{
             int eId = x._1();
             IntArrayList eInNeighbors = inNeighbors_BV.value().get(eId);
@@ -238,7 +245,7 @@ public class EntityBasedCNPNeighbors implements Serializable {
             if (eInNeighbors == null) {
                 return partialNeighborSims.iterator(); //empty
             }
-            for (Map.Entry<Integer, Float> eIdValueCandidates : x._2().entrySet()) { 
+            for (Map.Entry<Integer, Float> eIdValueCandidates : x._2().entrySet()) { //for each candidate match of eId from values
                 IntArrayList inNeighborsOfCandidate = inNeighbors_BV.value().get(eIdValueCandidates.getKey());
                 if (inNeighborsOfCandidate == null) {
                     continue; //go to next candidate match. this one does not have in-neighbors
@@ -254,6 +261,7 @@ public class EntityBasedCNPNeighbors implements Serializable {
             
             return partialNeighborSims.iterator();
         })
+        //keep top-K candidates per (key) entity
         .combineByKey(//should be faster than groupByKey (keeps local top-Ks before shuffling, like a combiner in MapReduce)
             //createCombiner
             x-> {
@@ -263,8 +271,8 @@ public class EntityBasedCNPNeighbors implements Serializable {
             }
             //mergeValue
             , (PriorityQueue<CustomCandidate> pq, CustomCandidate x) -> {
-                pq = removeSamePairWithLowerValue(pq, x); //important: fist check that and then add the element
-                pq.add(x); //important: only add that after checking for same entity in pq with lower value
+                pq.add(x); 
+                pq = removeSamePairWithLowerValue(pq, x);                
                 if (pq.size() > K) {
                     pq.poll();
                 }
@@ -274,8 +282,8 @@ public class EntityBasedCNPNeighbors implements Serializable {
             , (PriorityQueue<CustomCandidate> pq1, PriorityQueue<CustomCandidate> pq2) -> {
                 while (!pq2.isEmpty()) {
                     CustomCandidate c = pq2.poll();
-                    pq1 = removeSamePairWithLowerValue(pq1, c); //important: fist check that and then add the element
-                    pq1.add(c); //important: only add that after checking for same entity in pq with lower value
+                    pq1.add(c);
+                    pq1 = removeSamePairWithLowerValue(pq1, c);                    
                     if (pq1.size() > K) {
                         pq1.poll();
                     }
@@ -292,18 +300,38 @@ public class EntityBasedCNPNeighbors implements Serializable {
         });
     }
 
+    /**
+     * At this point, pq contains x and maybe 1 more element y with the same key as x. If y exists, keep from those two the one with the better value. 
+     * If y does not exist, keep x. 
+     * @param pq
+     * @param x
+     * @return 
+     */
     private PriorityQueue<CustomCandidate> removeSamePairWithLowerValue(PriorityQueue<CustomCandidate> pq, CustomCandidate x) {
         int entityIdToAdd = x.getEntityId();
-        float valueToAdd = x.getValue();
-        CustomCandidate oldElementWithLowerValue = null;
+        float newValue = x.getValue();
+        CustomCandidate elementToDelete = null;
+        boolean sameValueTwice = false;
         for (CustomCandidate qElement : pq) { //traverses the queue in random order
-            if (qElement.getEntityId() == entityIdToAdd && qElement.getValue() < valueToAdd) { //same entity found with lower value
-                oldElementWithLowerValue = qElement;
-                break;
+            if (qElement.getEntityId() == entityIdToAdd) {
+                if (qElement.getValue() < newValue) { //y is worse than x => delete y
+                    elementToDelete = qElement;
+                    break;
+                } else if (qElement.getValue() > newValue) { //y is better than x => delete x
+                    elementToDelete = x;
+                    break;
+                } else {  //qElement has the same value as x
+                    if (!sameValueTwice) { //first time meeting this element (it can be x or a y with the same rank)
+                        sameValueTwice = true; 
+                    } else{               //second time meeting this element (x and y are equivalent => delete one of them)
+                        elementToDelete = x;
+                        break;
+                    }
+                }
             }
         }
-        if (oldElementWithLowerValue != null) {
-            pq.remove(oldElementWithLowerValue);
+        if (elementToDelete != null) {
+            pq.remove(elementToDelete);
         }
         return pq;
     }
