@@ -17,8 +17,6 @@ package metablockingspark.rankAggregation;
 
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
 import java.io.Serializable;
-import java.util.HashMap;
-import java.util.Map;
 import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
@@ -39,14 +37,7 @@ public class LocalRankAggregation implements Serializable {
      */
     public JavaPairRDD<Integer,Integer> getTopCandidatePerEntity(JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates) {
         return topKValueCandidates                
-                .mapValues(x -> {
-                    Map<Integer, Float> rankedCandidates = new HashMap<>();
-                    //sort by descending value sim
-                    for (Map.Entry<Integer, Float> entry : x.entrySet()) {
-                       rankedCandidates.put(entry.getKey(), entry.getValue());
-                    }                    
-                    return new IntArrayList(Utils.sortByValue(rankedCandidates, true).keySet());
-                })                
+                .mapValues(x -> new IntArrayList(Utils.sortByValue(x, true).keySet())) //sort the int2floatopenhashmap and get the keys (entityIds) sorted by values (value similarity) (descending)                
                 .fullOuterJoin(topKNeighborCandidates)
                 .mapValues(x -> top1Borda(x))
                 .filter((x -> x._2() != null));
@@ -67,8 +58,10 @@ public class LocalRankAggregation implements Serializable {
         if (list1 == null && list2 == null) {
             return null;
         } else if (list2 == null) {
+            //System.out.println("The only candidate (from values) is :"+list1.get(0));
             return list1.get(0);
         } else if (list1 == null) {
+            //System.out.println("The only candidate (from neighbors) is :"+list2.get(0));
             return list2.get(0);
         }
         
@@ -113,7 +106,10 @@ public class LocalRankAggregation implements Serializable {
                 }
             } //else, this has been already checked            
         }
-        
+        /*
+        System.out.println("The top candidates from values are: "+list1+"\n"
+                + "The top candidates from neighb are: "+list2+"\n"
+                + "The top candidate is "+top1._1());*/
         return top1._1();        
     }
     

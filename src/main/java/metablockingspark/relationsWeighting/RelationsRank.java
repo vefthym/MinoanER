@@ -66,21 +66,11 @@ public class RelationsRank implements Serializable {
         JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex = getRelationIndex(rawTriples, SEPARATOR, entityIds_BV);        
         
         rawTriples.unpersist();        
-        relationIndex.persist(StorageLevel.MEMORY_AND_DISK_SER());        
-        
+        relationIndex.persist(StorageLevel.MEMORY_AND_DISK_SER());                
                         
-        List<String> relationsRank = getRelationsRank(relationIndex, MIN_SUPPORT_THRESHOLD, numEntitiesSquared);
-        //System.out.println("Sorted relations:"+Arrays.toString(relationsRank.toArray()));
+        List<String> relationsRank = getRelationsRank(relationIndex, MIN_SUPPORT_THRESHOLD, numEntitiesSquared);        
         
         Map<Integer, IntArrayList> topNeighbors = getTopNNeighborsPerEntity(relationIndex, relationsRank, N, positiveIds).collectAsMap(); //action
-        
-        int i = 10;
-        for (Map.Entry<Integer, IntArrayList> entry : topNeighbors.entrySet()) {
-            System.out.println("top neighbors of "+entry.getKey()+":"+entry.getValue().toString());            
-            if (--i == 0) {
-                break;
-            }
-        }        
         
         relationIndex.unpersist(); 
         
@@ -111,7 +101,7 @@ public class RelationsRank implements Serializable {
      * @return a relation index of the form: key: relationString, value: list of (subjectId, objectId) linked by this relation
      */
     public JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> getRelationIndex(JavaRDD<String> rawTriples, String SEPARATOR, Broadcast<Object2IntOpenHashMap<String>> subjects_BV) {        
-        JavaPairRDD<String,Tuple2<Integer,Integer>> rawRelationsRDD = rawTriples        
+        return rawTriples        
         .mapToPair(line -> {
           String[] spo = line.replaceAll(" \\.$", "").split(SEPARATOR);
           if (spo.length != 3) {
@@ -121,12 +111,8 @@ public class RelationsRank implements Serializable {
           int objectId = subjects_BV.value().getOrDefault(spo[2], -1); //-1 if the object is not an entity, otherwise the entityId      
           return new Tuple2<>(spo[1], new Tuple2<>(subjectId, objectId)); //relation, (subjectId, objectId)
         })        
-        .filter(x -> x!= null);
-        
-        //subjects_BV.unpersist();
-        //subjects_BV.destroy();
-        
-        return rawRelationsRDD.groupByKey()       
+        .filter(x -> x!= null)
+        .groupByKey()       
         .filter(x -> {                  //keep only relations (properties that have more object values than datatype values)
             int relationCount = 0;
             int numInstances = 0;
@@ -155,8 +141,7 @@ public class RelationsRank implements Serializable {
         unnormalizedSupports.setName("unnormalizedSupports").cache();        
         
         System.out.println(unnormalizedSupports.count()+" relations have been assigned a support value"); // dummy action to trigger execution
-        float max_support = unnormalizedSupports.values().max(Ordering.natural());
-        System.out.println("Max support = "+max_support);
+        float max_support = unnormalizedSupports.values().max(Ordering.natural());        
         return unnormalizedSupports
                 .mapValues(x-> x/max_support)
                 .filter(x-> x._2()> minSupportThreshold);
