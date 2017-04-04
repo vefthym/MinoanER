@@ -119,11 +119,8 @@ public class FullMetaBlockingWorkflow {
         
         //get the total weights of each entity, required by WJS weigthing scheme (only)
         System.out.println("\n\nStarting EntityWeightsWJS...");
-        EntityWeightsWJS wjsWeights = new EntityWeightsWJS();        
-        Int2FloatOpenHashMap totalWeights = new Int2FloatOpenHashMap();
-        wjsWeights.getWeights(blocksFromEI, entityIndex).foreach(entry -> {
-            totalWeights.put(entry._1().intValue(), entry._2().floatValue());
-        });
+        EntityWeightsWJS wjsWeights = new EntityWeightsWJS();                
+        Int2FloatOpenHashMap totalWeights = new Int2FloatOpenHashMap(wjsWeights.getWeights(blocksFromEI, entityIndex).collectAsMap()); //action
         Broadcast<Int2FloatOpenHashMap> totalWeights_BV = jsc.broadcast(totalWeights);        
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
