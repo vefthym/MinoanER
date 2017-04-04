@@ -18,7 +18,6 @@ package metablockingspark.entityBased.neighbors;
 
 import metablockingspark.entityBased.*;
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
-import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -125,13 +124,13 @@ public class EntityBasedCNPNeighbors implements Serializable {
                     float entityWeight = totalWeightsBV.value().get(entityId);
                     for (int candidateId : counters.keySet()) {
 			float currentWeight = counters.get(candidateId) / (Float.MIN_NORMAL + entityWeight + totalWeightsBV.value().get(candidateId));
-			weights.put(candidateId, currentWeight);			
+			weights.put(candidateId, currentWeight);			                        
                     }
                     
                     //keep the top-K weights
                     weights = Utils.sortByValue(weights, true);                                        
                     Int2FloatOpenHashMap weightsToEmit = new Int2FloatOpenHashMap();                                      
-                    int i = 0;
+                    int i = 0;                    
                     for (int neighbor : weights.keySet()) {                        
                         if (i == weights.size() || i == K) {
                             break;
@@ -199,7 +198,7 @@ public class EntityBasedCNPNeighbors implements Serializable {
         }).combineByKey( //should be faster than groupByKey (keeps local top-Ks before shuffling, like a combiner in MapReduce)
             //createCombiner
             x-> {
-                PriorityQueue<CustomCandidate> initial = new PriorityQueue<>(K);
+                PriorityQueue<CustomCandidate> initial = new PriorityQueue<>();
                 initial.add(new CustomCandidate(x));
                 return initial; 
             }
@@ -265,7 +264,7 @@ public class EntityBasedCNPNeighbors implements Serializable {
         .combineByKey(//should be faster than groupByKey (keeps local top-Ks before shuffling, like a combiner in MapReduce)
             //createCombiner
             x-> {
-                PriorityQueue<CustomCandidate> initial = new PriorityQueue<>(K);
+                PriorityQueue<CustomCandidate> initial = new PriorityQueue<>();
                 initial.add(x);
                 return initial; 
             }
@@ -292,10 +291,14 @@ public class EntityBasedCNPNeighbors implements Serializable {
             }
         ).mapValues(x -> {      //just reverse the order of candidates and transform values to IntArrayList (topK are kept already)      
             int i = x.size();   
-            int[] candidates = new int[i];            
+            int[] candidates = new int[i]; 
+//            System.out.println("Top neighbor sims for this entity: ");
             while (!x.isEmpty()) {
-                candidates[--i] = x.poll().getEntityId(); //get pq elements in reverse (i.e., descending neighbor sim) order
+                CustomCandidate cand = x.poll();
+                candidates[--i] = cand.getEntityId(); //get pq elements in reverse (i.e., descending neighbor sim) order
+//                System.out.print(cand.getValue()+",");
             }
+//            System.out.println();
             return new IntArrayList(candidates);
         });
     }
@@ -336,10 +339,6 @@ public class EntityBasedCNPNeighbors implements Serializable {
         return pq;
     }
 
-    
-    
-    
-    
     
     
     

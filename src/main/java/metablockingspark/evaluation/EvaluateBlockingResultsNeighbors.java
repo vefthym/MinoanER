@@ -119,10 +119,8 @@ public class EvaluateBlockingResultsNeighbors extends BlockingEvaluation {
         //get the total weights of each entity, required by WJS weigthing scheme (only)
         System.out.println("\n\nStarting EntityWeightsWJS...");
         EntityWeightsWJS wjsWeights = new EntityWeightsWJS();        
-        Int2FloatOpenHashMap totalWeights = new Int2FloatOpenHashMap();
-        wjsWeights.getWeights(blocksFromEI, entityIndex).foreach(entry -> {
-            totalWeights.put(entry._1().intValue(), entry._2().floatValue()); //without unboxing it calls a deprecated method, ignore warning
-        });
+        Int2FloatOpenHashMap totalWeights = new Int2FloatOpenHashMap(wjsWeights.getWeights(blocksFromEI, entityIndex).collectAsMap());        
+        System.out.println("Total weights contain "+totalWeights.keySet().size()+" entity weights before broadcasting");
         Broadcast<Int2FloatOpenHashMap> totalWeights_BV = jsc.broadcast(totalWeights);        
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity

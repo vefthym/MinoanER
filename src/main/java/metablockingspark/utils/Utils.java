@@ -154,7 +154,7 @@ public class Utils {
         
         return gt.mapToPair(line -> {
                     String [] parts = line.split(GT_SEPARATOR);
-                    return new Tuple2<>(-entityIds2.getOrDefault(parts[1], 1), //negative id first
+                    return new Tuple2<>(-entityIds2.getOrDefault(parts[1], -1), //negative id first
                                         entityIds1.getOrDefault(parts[0], -1)); //positive id second
                 })
                 .filter(x-> x._1() != 1 && x._2() != -1);

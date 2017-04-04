@@ -239,8 +239,8 @@ public class RelationsRank implements Serializable {
             int i = topN.size();   
             int[] candidates = new int[i];            
             while (!topN.isEmpty()) {
-                candidates[--i] = topN.poll().getEntityId(); //get pq elements in reverse (i.e., ascending rank) order
-            }
+                candidates[--i] = topN.poll().getEntityId(); //get pq elements in reverse (i.e., ascending rank) order                
+            }            
             return new IntArrayList(candidates);
         });
        
