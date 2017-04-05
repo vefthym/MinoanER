@@ -174,26 +174,43 @@ public class EvaluateRankAggregation {
         }
         
         //load the results
-        aggregationResults = 
-            //aggregationResults.filter(x -> x._1() < 0); //evaluate negative ids
-                aggregationResults.filter(x-> x._1() >= 0).mapToPair(x -> x.swap()); //evaluate positive ids
+        aggregationResults.cache();
+        JavaPairRDD<Integer,Integer> negativeResults = aggregationResults.filter(x -> x._1() < 0); //evaluate negative ids
+        JavaPairRDD<Integer,IntArrayList> positiveResults = aggregationResults.filter(x-> x._1() >= 0)
+                .mapToPair(x -> x.swap()) //evaluate positive ids
+                .groupByKey().mapValues(x-> { //many positive ids may have been matched to the same negative id
+                    IntArrayList result = new IntArrayList();
+                    for (int candidate : x) {
+                        result.add(candidate);
+                    }                    
+                    return result;
+                });
         
         //Start the evaluation        
         LongAccumulator TPs = jsc.sc().longAccumulator("TPs");
         LongAccumulator FPs = jsc.sc().longAccumulator("FPs");
         LongAccumulator FNs = jsc.sc().longAccumulator("FNs");
         EvaluateMatchingResults evaluation = new EvaluateMatchingResults();
+        EvaluateBlockingResults blockingEvaluation = new EvaluateBlockingResults();
         
         JavaPairRDD<Integer,Integer> gt = Utils.getGroundTruthIdsFromEntityIds(jsc.textFile(entityIds1, PARALLELISM), jsc.textFile(entityIds2, PARALLELISM), jsc.textFile(groundTruthPath), GT_SEPARATOR);
         gt.cache();        
         
         System.out.println("Finished loading the ground truth with "+ gt.count()+" matches, now evaluating the results...");
         
-        evaluation.evaluateResults(aggregationResults, gt, TPs, FPs, FNs);
-        System.out.println("Evaluation finished successfully.");
-        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());                        
+        evaluation.evaluateResults(negativeResults, gt, TPs, FPs, FNs);
+        System.out.println("\nNegative entity ids results:");
+        System.out.println("Found "+negativeResults.count()+" negative entities to be matched");
+        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
         
-        spark.stop();
+        TPs.reset();
+        FPs.reset();
+        FNs.reset();
+        
+        blockingEvaluation.evaluateBlockingResults(positiveResults, gt, TPs, FPs, FNs);
+        System.out.println("\nPositive entity ids results:");
+        System.out.println("Found "+positiveResults.count()+" positive entities to be matched");
+        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
         
         spark.stop();
     }

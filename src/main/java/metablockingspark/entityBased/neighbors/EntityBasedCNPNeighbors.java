@@ -16,6 +16,8 @@
 
 package metablockingspark.entityBased.neighbors;
 
+import it.unimi.dsi.fastutil.ints.Int2FloatLinkedOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2FloatMap;
 import metablockingspark.entityBased.*;
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
 import java.util.ArrayList;
@@ -96,7 +98,7 @@ public class EntityBasedCNPNeighbors implements Serializable {
         //metaBlockingResults: key: a negative entityId, value: a list of candidate matches (positive entity ids) along with their value_sim with the key
         return mapOutput
                 .groupByKey() //for each entity create an iterable of arrays of candidate matches (one array from each common block)                
-                .mapToPair(x -> {
+                .mapToPair(x -> {                    
                     int entityId = x._1();
                     
                     //compute the numerators
@@ -120,7 +122,7 @@ public class EntityBasedCNPNeighbors implements Serializable {
                     }
                                         
                     //calculate the weight of each edge in the blocking graph (i.e., for each candidate match)
-                    Map<Integer, Float> weights = new HashMap<>();
+                    Int2FloatMap weights = new Int2FloatOpenHashMap();                                      
                     float entityWeight = totalWeightsBV.value().get(entityId);
                     for (int candidateId : counters.keySet()) {
 			float currentWeight = counters.get(candidateId) / (Float.MIN_NORMAL + entityWeight + totalWeightsBV.value().get(candidateId));
@@ -128,19 +130,20 @@ public class EntityBasedCNPNeighbors implements Serializable {
                     }
                     
                     //keep the top-K weights
-                    weights = Utils.sortByValue(weights, true);                                        
+                    weights = new Int2FloatLinkedOpenHashMap(Utils.sortByValue(weights, true));
                     Int2FloatOpenHashMap weightsToEmit = new Int2FloatOpenHashMap();                                      
                     int i = 0;                    
                     for (int neighbor : weights.keySet()) {                        
                         if (i == weights.size() || i == K) {
                             break;
                         }
-                        weightsToEmit.put(neighbor, (float)weights.get(neighbor));
+                        weightsToEmit.put(neighbor, weights.get(neighbor));
                         i++;
                     }
                     
                     return new Tuple2<>(entityId, weightsToEmit);
-                });
+                })
+                .filter(x-> !x._2().isEmpty());
     }    
     
     

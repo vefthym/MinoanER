@@ -183,7 +183,7 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
                     IntArrayList list1 = x._1().orElse(new IntArrayList());
                     IntArrayList list2 = x._2().orElse(new IntArrayList());
                     IntOpenHashSet resultSet = new IntOpenHashSet(list1);
-                    list1.addAll(list2);
+                    resultSet.addAll(list2);
                     return new IntArrayList(resultSet);
                 });
         

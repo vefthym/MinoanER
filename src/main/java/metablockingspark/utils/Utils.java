@@ -107,13 +107,15 @@ public class Utils {
     /**
      * Maps an entity url to its entity id, that is also used by blocking.
      * @param entityIdsText     
+     * @param positiveIds false, if the ids will be later converted to negatives, so that their numbering should start from -1, instead of 0
      * @return a map from an entity url to its entity id, that is also used by blocking.
      */
-    public static Object2IntOpenHashMap<String> readEntityIdsMapping(JavaRDD<String> entityIdsText) {        
+    public static Object2IntOpenHashMap<String> readEntityIdsMapping(JavaRDD<String> entityIdsText, boolean positiveIds) {        
         return new Object2IntOpenHashMap<>(entityIdsText
             .mapToPair(line -> {
                 String[] parts = line.split("\t");
-                return new Tuple2<>(parts[0], Integer.parseInt(parts[1]));
+                Integer id = Integer.parseInt(parts[1]);
+                return new Tuple2<>(parts[0], positiveIds ? id : id + 1); //negative ids should start from -1, not 0. they will be negated later
             })
             .collectAsMap());
     }
@@ -149,8 +151,8 @@ public class Utils {
      * @return 
      */
     public static JavaPairRDD<Integer,Integer> getGroundTruthIdsFromEntityIds (JavaRDD<String> entityIds1RDD, JavaRDD<String> entityIds2RDD, JavaRDD<String> gt, String GT_SEPARATOR) {
-        Object2IntOpenHashMap<String> entityIds1 = readEntityIdsMapping(entityIds1RDD);
-        Object2IntOpenHashMap<String> entityIds2 = readEntityIdsMapping(entityIds2RDD); 
+        Object2IntOpenHashMap<String> entityIds1 = readEntityIdsMapping(entityIds1RDD, true);
+        Object2IntOpenHashMap<String> entityIds2 = readEntityIdsMapping(entityIds2RDD, false); 
         
         return gt.mapToPair(line -> {
                     String [] parts = line.split(GT_SEPARATOR);

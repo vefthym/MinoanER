@@ -55,7 +55,7 @@ public class RelationsRank implements Serializable {
         
         //List<String> subjects = Utils.getEntityUrlsFromEntityRDDInOrder(rawTriples, SEPARATOR); //a list of (distinct) subject URLs, keeping insertion order (from original triples file)        
         //Object2IntOpenHashMap<String> subjects = Utils.getEntityIdsMapping(rawTriples, SEPARATOR);
-        Object2IntOpenHashMap<String> entityIds = Utils.readEntityIdsMapping(entityIdsRDD);
+        Object2IntOpenHashMap<String> entityIds = Utils.readEntityIdsMapping(entityIdsRDD, positiveIds);
         System.out.println("Found "+entityIds.size()+" entities in collection "+ (positiveIds?"1":"2"));
         
         long numEntitiesSquared = (long)entityIds.keySet().size();

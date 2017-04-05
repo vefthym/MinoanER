@@ -48,21 +48,22 @@ public class LocalRankAggregation implements Serializable {
         IntArrayList list2 = lists._2().orNull();
         
         //still don't know why those empty checks are needed...
+        /*
         if (list1 != null && list1.isEmpty()) {
             list1 = null;
         }
         if (list2 != null && list2.isEmpty()) {
             list2 = null;
-        }
+        }*/
         
         if (list1 == null && list2 == null) {
             return null;
         } else if (list2 == null) {
             //System.out.println("The only candidate (from values) is :"+list1.get(0));
-            return list1.get(0);
+            return list1.getInt(0);
         } else if (list1 == null) {
             //System.out.println("The only candidate (from neighbors) is :"+list2.get(0));
-            return list2.get(0);
+            return list2.getInt(0);
         }
         
         int size1 = list1.size();
@@ -86,7 +87,7 @@ public class LocalRankAggregation implements Serializable {
             int score1 = currScore--;
             int indexIn2 = list2.indexOf(element1);
             if (indexIn2 == -1) {
-                indexIn2 = size2; //check this value for non-existing elements in second list. set to size1 to always ignore such elements
+                indexIn2 = size1; //check this value for non-existing elements in second list. set to size1 to always ignore such elements, set to size2 to add as last of queue2
             }
             int score2 = size1-indexIn2; //(size2-list2.indexOf(element1))+(size1-size2);           
             if (score1+score2 > top1._2()) {
