@@ -187,7 +187,7 @@ public class EvaluateBlockingResultsCBS extends BlockingEvaluation {
         
         System.out.println("Finished loading the ground truth with "+ gt.count()+" matches, now evaluating the results...");  
         
-        evaluation.evaluateBlockingResults(valueResults, gt, TPs, FPs, FNs);
+        evaluation.evaluateBlockingResults(valueResults, gt, TPs, FPs, FNs, false);
         System.out.println("Evaluation finished successfully.");
         EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());           
         

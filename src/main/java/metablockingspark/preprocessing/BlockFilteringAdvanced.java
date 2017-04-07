@@ -104,22 +104,23 @@ public class BlockFilteringAdvanced {
         System.out.println("Creating the entity index...");
         
         return entityBlocks.groupByKey()
-            .mapValues(blocks -> {               
-                final int MAX_BLOCKS = ((Double)Math.floor(3*blocks.spliterator().getExactSizeIfKnown()/4+1)).intValue(); //|_ 3|Bi|/4+1 _| //preprocessing
+            .mapValues(blocks -> {                               
                 //sort the tuples by value (inverseUtility)
-                Map<Integer,Integer> inverseBlocks = new TreeMap<>(); 
+                Map<Integer,Integer> inverseBlocks = new TreeMap<>();
+                int numBlocks = 0;
                 for (Tuple2<Integer,Integer> block : blocks) {
-                    inverseBlocks.put(block._2(), block._1());                        
+                    inverseBlocks.put(block._2(), block._1());
+                    numBlocks++;
                 }
+                final int MAX_BLOCKS = ((Double)Math.floor(3*numBlocks/4+1)).intValue(); //|_ 3|Bi|/4+1 _| //preprocessing
 
                 //keep MAX_BLOCKS blocks per entity
-                List<Integer> blocksKept = new ArrayList<>();
+                IntArrayList entityIndex = new IntArrayList();                
                 int indexedBlocks = 0;
-                for (Integer blockId : inverseBlocks.values()) {
-                    blocksKept.add(blockId);
+                for (int blockId : inverseBlocks.values()) {
+                    entityIndex.add(blockId);
                     if (++indexedBlocks == MAX_BLOCKS) { break;} //comment-out this line to skip block filtering
-                }
-                IntArrayList entityIndex = new IntArrayList(blocksKept.stream().mapToInt(i->i).toArray());                
+                }                
                 BLOCK_ASSIGNMENTS.add(entityIndex.size());
 
                 return entityIndex;

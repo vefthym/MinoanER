@@ -36,7 +36,7 @@ public abstract class BlockingEvaluation {
      * @param FPs false positives to update (false matches)
      * @param FNs false negatives to update (missed matches)
      */
-    public void evaluateBlockingResults(JavaPairRDD<Integer,IntArrayList> blockingResults, JavaPairRDD<Integer,Integer> groundTruth, LongAccumulator TPs, LongAccumulator FPs, LongAccumulator FNs) {
+    public void evaluateBlockingResults(JavaPairRDD<Integer,IntArrayList> blockingResults, JavaPairRDD<Integer,Integer> groundTruth, LongAccumulator TPs, LongAccumulator FPs, LongAccumulator FNs, boolean verbose) {
         blockingResults
                 .fullOuterJoin(groundTruth)
                 .foreach(joinedMatch -> {
@@ -44,14 +44,20 @@ public abstract class BlockingEvaluation {
                     Integer correctResult = joinedMatch._2()._2().orElse(null);
                     if (myCandidates == null) { //this means that the correct result is not null (otherwise, nothing to join here)
                         FNs.add(1); //missed match
+                        if (verbose) {
+                            System.out.println("FN: Did not provide any match for "+joinedMatch._1());
+                        }
                     } else if (correctResult == null) {
                         FPs.add(myCandidates.size()); //each candidate is a false match (no candidate should exist)
                     } else if (myCandidates.contains(correctResult)) {
                         TPs.add(1); //true match
                         FPs.add(myCandidates.size()-1); //the rest are false matches (ideal: only one candidate suggested)
                     } else {        //then the correct result is not included in my candidates => I missed this match and all my candidates are wrong
-                        FPs.add(myCandidates.size()); //all my candidates were wrong 
+                        FPs.add(myCandidates.size()); //all my candidates were false 
                         FNs.add(1); //the correct match was missed
+                        if (verbose) {
+                            System.out.println("FN: Provided false matches "+myCandidates+" for "+joinedMatch._1()+". The correct results was "+correctResult);
+                        }
                     }                    
                 });
     }

@@ -18,8 +18,10 @@ package metablockingspark.utils;
 
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -27,6 +29,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.apache.commons.lang3.StringEscapeUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -76,7 +79,7 @@ public class Utils {
     public static List<String> getEntityUrlsFromEntityRDDInOrder(JavaRDD<String> rawTriples, String SEPARATOR) {
         return new ArrayList<>(
                 new LinkedHashSet<>(rawTriples
-                .map(line -> line.split(SEPARATOR)[0])
+                .map(line -> encodeURIinUTF8(line.toLowerCase().split(SEPARATOR)[0]))
                 .collect())
                 ); //convert list to set (to remove duplicates) and back to list (to have index of each element)
     }
@@ -113,7 +116,7 @@ public class Utils {
     public static Object2IntOpenHashMap<String> readEntityIdsMapping(JavaRDD<String> entityIdsText, boolean positiveIds) {        
         return new Object2IntOpenHashMap<>(entityIdsText
             .mapToPair(line -> {
-                String[] parts = line.split("\t");
+                String[] parts = line.toLowerCase().split("\t");
                 Integer id = Integer.parseInt(parts[1]);
                 return new Tuple2<>(parts[0], positiveIds ? id : id + 1); //negative ids should start from -1, not 0. they will be negated later
             })
@@ -155,11 +158,30 @@ public class Utils {
         Object2IntOpenHashMap<String> entityIds2 = readEntityIdsMapping(entityIds2RDD, false); 
         
         return gt.mapToPair(line -> {
-                    String [] parts = line.split(GT_SEPARATOR);
+                    line = line.toLowerCase();
+                    String [] parts = line.split(GT_SEPARATOR);                    
+                    parts[1] = encodeURIinUTF8(parts[1]);
                     return new Tuple2<>(-entityIds2.getOrDefault(parts[1], -1), //negative id first
                                         entityIds1.getOrDefault(parts[0], -1)); //positive id second
                 })
                 .filter(x-> x._1() != 1 && x._2() != -1);
+    }
+    
+    /**
+     * Return the ground truth in an RDD format, each entity represented with an integer entity id. 
+     * @param entityIds1RDD
+     * @param entityIds2RDD
+     * @param gt
+     * @param GT_SEPARATOR
+     * @return 
+     */
+    public static JavaPairRDD<Integer,Integer> readGroundTruthIdsFromEntityIds (JavaRDD<String> entityIds1RDD, JavaRDD<String> entityIds2RDD, JavaRDD<String> gt, String GT_SEPARATOR) {
+        return gt.mapToPair(line -> {                    
+                    String [] parts = line.split(GT_SEPARATOR);                    
+                    int entity1Id = Integer.parseInt(parts[0]);
+                    int entity2Id = Integer.parseInt(parts[1]);
+                    return new Tuple2<>(-entity2Id-1, entity1Id);                                        
+                });
     }
     
     /**
@@ -194,4 +216,22 @@ public class Utils {
             .getOrCreate();        
     }
     
+    public static String encodeURIinUTF8(String uri) {
+        if (uri.startsWith("<http://dbpedia.org/resource/")) {            
+            int splitPoint = uri.lastIndexOf("/")+1;
+            String infix = uri.substring(splitPoint, uri.length()-1);
+            if (infix.contains("%")) {
+                return uri;
+            }
+            try {
+                infix = infix.replace("\\\\", "\\");
+                infix = StringEscapeUtils.unescapeJava(infix);
+                infix = URLEncoder.encode(infix, "UTF-8");            
+            } catch (UnsupportedEncodingException ex) {
+                System.err.println("Encoding exception: "+ex);
+            }
+            uri = uri.substring(0, splitPoint) + infix + ">";            
+        }
+        return uri;
+    }
 }

@@ -62,19 +62,34 @@ public class RelationsRank implements Serializable {
         numEntitiesSquared *= numEntitiesSquared;
         
         Broadcast<Object2IntOpenHashMap<String>> entityIds_BV = jsc.broadcast(entityIds);
-        
-        JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex = getRelationIndex(rawTriples, SEPARATOR, entityIds_BV);        
+         
+        JavaPairRDD<String,List<Tuple2<Integer, Integer>>> relationIndex = getRelationIndex(rawTriples, SEPARATOR, entityIds_BV); //a list of (s,o) for each predicate      
         
         rawTriples.unpersist();        
         relationIndex.persist(StorageLevel.MEMORY_AND_DISK_SER());                
                         
         List<String> relationsRank = getRelationsRank(relationIndex, MIN_SUPPORT_THRESHOLD, numEntitiesSquared);        
         
-        Map<Integer, IntArrayList> topNeighbors = getTopNNeighborsPerEntity(relationIndex, relationsRank, N, positiveIds).collectAsMap(); //action
+        JavaPairRDD<Integer, IntArrayList> topOutNeighbors = getTopNOutNeighborsPerEntity(relationIndex, relationsRank, N, positiveIds); //action
         
         relationIndex.unpersist(); 
         
-        return topNeighbors;
+        //reverse the outNeighbors, to get in neighbors
+        Map<Integer, IntArrayList> inNeighbors =
+        topOutNeighbors.flatMapToPair(x -> { //reverse the neighbor pairs from (in,[out1,out2,out3]) to (out1,in), (out2,in), (out3,in)
+                    List<Tuple2<Integer,Integer>> inNeighbs = new ArrayList<>();
+                    for (int outNeighbor : x._2()) {
+                        inNeighbs.add(new Tuple2<>(outNeighbor, x._1()));
+                    }
+                    return inNeighbs.iterator();
+                })
+                .aggregateByKey(new IntOpenHashSet(), 
+                        (x,y) -> {x.add(y); return x;}, 
+                        (x,y) -> {x.addAll(y); return x;})
+                .mapValues(x-> new IntArrayList(x))
+                .collectAsMap();
+        
+        return inNeighbors;
     }
     
     
@@ -86,7 +101,7 @@ public class RelationsRank implements Serializable {
      * @param numEntitiesSquared
      * @return a list of relations sorted in descending score.
      */
-    public List<String> getRelationsRank(JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex, float minSupportThreshold, long numEntitiesSquared) {                        
+    public List<String> getRelationsRank(JavaPairRDD<String,List<Tuple2<Integer, Integer>>> relationIndex, float minSupportThreshold, long numEntitiesSquared) {                        
         JavaPairRDD<String,Float> supports = getSupportOfRelations(relationIndex, numEntitiesSquared, minSupportThreshold);
         JavaPairRDD<String,Float> discrims = getDiscriminabilityOfRelations(relationIndex);
         
@@ -100,15 +115,15 @@ public class RelationsRank implements Serializable {
      * @param subjects_BV
      * @return a relation index of the form: key: relationString, value: list of (subjectId, objectId) linked by this relation
      */
-    public JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> getRelationIndex(JavaRDD<String> rawTriples, String SEPARATOR, Broadcast<Object2IntOpenHashMap<String>> subjects_BV) {        
+    public JavaPairRDD<String,List<Tuple2<Integer, Integer>>> getRelationIndex(JavaRDD<String> rawTriples, String SEPARATOR, Broadcast<Object2IntOpenHashMap<String>> subjects_BV) {        
         return rawTriples        
         .mapToPair(line -> {
-          String[] spo = line.replaceAll(" \\.$", "").split(SEPARATOR);
+          String[] spo = line.toLowerCase().replaceAll(" \\.$", "").split(SEPARATOR);
           if (spo.length != 3) {
               return null;
           }
-          int subjectId = subjects_BV.value().getInt(spo[0]); //replace subject url with entity id (subjects belongs to subjects by default)
-          int objectId = subjects_BV.value().getOrDefault(spo[2], -1); //-1 if the object is not an entity, otherwise the entityId      
+          int subjectId = subjects_BV.value().getInt(Utils.encodeURIinUTF8(spo[0])); //replace subject url with entity id (subjects belongs to subjects by default)
+          int objectId = subjects_BV.value().getOrDefault(Utils.encodeURIinUTF8(spo[2]), -1); //-1 if the object is not an entity, otherwise the entityId      
           return new Tuple2<>(spo[1], new Tuple2<>(subjectId, objectId)); //relation, (subjectId, objectId)
         })        
         .filter(x -> x!= null)
@@ -135,9 +150,9 @@ public class RelationsRank implements Serializable {
         });        
     }
     
-    public JavaPairRDD<String,Float> getSupportOfRelations(JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex, long numEntititiesSquared, float minSupportThreshold) {
+    public JavaPairRDD<String,Float> getSupportOfRelations(JavaPairRDD<String,List<Tuple2<Integer, Integer>>> relationIndex, long numEntititiesSquared, float minSupportThreshold) {
         JavaPairRDD<String, Float> unnormalizedSupports = relationIndex
-                .mapValues(so -> (float) so.spliterator().getExactSizeIfKnown() / numEntititiesSquared);
+                .mapValues(so -> (float)so.size() / numEntititiesSquared);
         unnormalizedSupports.setName("unnormalizedSupports").cache();        
         
         System.out.println(unnormalizedSupports.count()+" relations have been assigned a support value"); // dummy action to trigger execution
@@ -147,7 +162,7 @@ public class RelationsRank implements Serializable {
                 .filter(x-> x._2()> minSupportThreshold);
     }
     
-    public JavaPairRDD<String,Float> getDiscriminabilityOfRelations(JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex) {
+    public JavaPairRDD<String,Float> getDiscriminabilityOfRelations(JavaPairRDD<String,List<Tuple2<Integer, Integer>>> relationIndex) {
         return relationIndex.mapValues(soIterable -> {
                 int frequencyOfRelation = 0;
                 IntOpenHashSet localObjects = new IntOpenHashSet();
@@ -177,7 +192,7 @@ public class RelationsRank implements Serializable {
      * @param postiveIds true if entity ids should be positive, false, if they should be reversed (-eId), i.e., if it is dataset1, or dataset 2
      * @return 
      */
-    public JavaPairRDD<Integer, IntArrayList> getTopNNeighborsPerEntity(JavaPairRDD<String,Iterable<Tuple2<Integer, Integer>>> relationIndex, List<String> relationsRank, int N, boolean postiveIds) {
+    public JavaPairRDD<Integer, IntArrayList> getTopNOutNeighborsPerEntity(JavaPairRDD<String,List<Tuple2<Integer, Integer>>> relationIndex, List<String> relationsRank, int N, boolean postiveIds) {
         return relationIndex.flatMapToPair(x-> {
                 List<Tuple2<Integer, Tuple2<String, Integer>>> entities = new ArrayList<>(); //key: subjectId, value: (relation, objectId)
                 for (Tuple2<Integer,Integer> relatedEntities : x._2()) {

@@ -58,7 +58,7 @@ public class EvaluateTop1RankedFromEach {
             entityIds1 = "";
             entityIds2 = "";
             groundTruthPath = "/file:C:\\Users\\VASILIS\\Documents\\OAEI_Datasets\\exportedBlocks\\testOutput";            
-        } else if (args.length == 6) {            
+        } else if (args.length >= 6) {            
             tmpPath = "/file:/tmp";
             //master = "spark://master:7077";
             inputPath = args[0];
@@ -112,7 +112,7 @@ public class EvaluateTop1RankedFromEach {
         Broadcast<Int2FloatOpenHashMap> totalWeights_BV = jsc.broadcast(totalWeights);        
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
-        final int K = ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
+        final int K = (args.length == 7) ? Integer.parseInt(args[6]) : ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
         System.out.println(BLOCK_ASSIGNMENTS_ACCUM.value()+" block assignments");
         System.out.println(CLEAN_BLOCK_ACCUM.value()+" clean blocks");
         System.out.println(NUM_COMPARISONS_ACCUM.value()+" comparisons");
@@ -212,7 +212,7 @@ public class EvaluateTop1RankedFromEach {
         FPs.reset();
         FNs.reset();
         
-        blockingEvaluation.evaluateBlockingResults(positiveValueResults, gt, TPs, FPs, FNs);
+        blockingEvaluation.evaluateBlockingResults(positiveValueResults, gt, TPs, FPs, FNs, false);
         System.out.println("\nPositive entity ids value results:");
         EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
         
@@ -229,7 +229,7 @@ public class EvaluateTop1RankedFromEach {
         FPs.reset();
         FNs.reset();
         
-        blockingEvaluation.evaluateBlockingResults(positiveNeighborResults, gt, TPs, FPs, FNs);
+        blockingEvaluation.evaluateBlockingResults(positiveNeighborResults, gt, TPs, FPs, FNs, false);
         System.out.println("\nPositive entity ids neighbor results:");
         EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
         

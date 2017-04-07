@@ -63,7 +63,7 @@ public class EvaluateContributionsFromValuesAndNeighbors extends BlockingEvaluat
             entityIds2 = "";
             groundTruthPath = ""; 
             groundTruthOutputPath = "";
-        } else if (args.length == 6) {            
+        } else if (args.length >= 6) {            
             tmpPath = "/file:/tmp";
             //master = "spark://master:7077";
             inputPath = args[0];
@@ -125,7 +125,7 @@ public class EvaluateContributionsFromValuesAndNeighbors extends BlockingEvaluat
         Broadcast<Int2FloatOpenHashMap> totalWeights_BV = jsc.broadcast(totalWeights);        
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
-        final int K = ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
+        final int K = (args.length == 7) ? Integer.parseInt(args[6]) : ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
         System.out.println(BLOCK_ASSIGNMENTS_ACCUM.value()+" block assignments");
         System.out.println(CLEAN_BLOCK_ACCUM.value()+" clean blocks");
         System.out.println(NUM_COMPARISONS_ACCUM.value()+" comparisons");
