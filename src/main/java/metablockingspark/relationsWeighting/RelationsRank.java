@@ -40,7 +40,7 @@ import scala.Tuple2;
 public class RelationsRank implements Serializable {
     
     /**
-     * return a map of topN neighbors per entity
+     * return a map of topN neighbors per entity (reversed to point to in-neighbors (values) having the key entity as their top out-neighbor)
      * @param rawTriples
      * @param SEPARATOR
      * @param entityIdsRDD

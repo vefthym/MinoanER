@@ -83,18 +83,19 @@ public class BlockFilteringAdvanced {
             int D2counter = numEntities-D1counter;
             long blockComparisons = D1counter * D2counter;
             
+            List<Tuple2<Integer, Tuple2<Integer,Integer>>> mapResults = new ArrayList<>();
+            
             int inverseUtility = Math.max(D1counter, D2counter);
-            if (blockComparisons == 0) {
-                inverseUtility = 0;
+            if (blockComparisons == 0) {                
+                return mapResults.iterator(); //empty
             } 
             Tuple2<Integer,Integer> blockUtility = new Tuple2<>(block._1(), inverseUtility);  
-            
-            List<Tuple2<Integer, Tuple2<Integer,Integer>>> mapResults = new ArrayList<>();
+                        
             for (Integer entityId : entities) {
                 mapResults.add(new Tuple2<>(entityId, blockUtility));
             }
             return mapResults.iterator();
-        });
+        });        
     }
     
     

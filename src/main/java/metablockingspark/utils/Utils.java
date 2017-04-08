@@ -168,14 +168,12 @@ public class Utils {
     }
     
     /**
-     * Return the ground truth in an RDD format, each entity represented with an integer entity id. 
-     * @param entityIds1RDD
-     * @param entityIds2RDD
-     * @param gt
+     * Return the ground truth in an RDD format, each entity represented with an integer entity id.      
+     * @param gt a ground truth file containing matching entities' ids, separated by GT_SEPARATOR
      * @param GT_SEPARATOR
      * @return 
      */
-    public static JavaPairRDD<Integer,Integer> readGroundTruthIdsFromEntityIds (JavaRDD<String> entityIds1RDD, JavaRDD<String> entityIds2RDD, JavaRDD<String> gt, String GT_SEPARATOR) {
+    public static JavaPairRDD<Integer,Integer> readGroundTruthIdsFromEntityIds (JavaRDD<String> gt, String GT_SEPARATOR) {
         return gt.mapToPair(line -> {                    
                     String [] parts = line.split(GT_SEPARATOR);                    
                     int entity1Id = Integer.parseInt(parts[0]);

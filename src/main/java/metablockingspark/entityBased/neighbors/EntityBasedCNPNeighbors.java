@@ -326,7 +326,7 @@ public class EntityBasedCNPNeighbors implements Serializable {
                 } else if (qElement.getValue() > newValue) { //y is better than x => delete x
                     elementToDelete = x;
                     break;
-                } else {  //qElement has the same value as x
+                } else {  //qElement has the same value as x (or is x)
                     if (!sameValueTwice) { //first time meeting this element (it can be x or a y with the same rank)
                         sameValueTwice = true; 
                     } else{               //second time meeting this element (x and y are equivalent => delete one of them)
