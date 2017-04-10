@@ -21,6 +21,7 @@ import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.Optional;
+import org.apache.spark.util.LongAccumulator;
 import scala.Tuple2;
 
 /**
@@ -35,26 +36,17 @@ public class LocalRankAggregation implements Serializable {
      * @param topKNeighborCandidates the top candidate matches per entity based on neighbors, in the form: key: entityId, value: ranked list of [candidateMatch]
      * @return the top-1 aggregate candidate match per entity
      */
-    public JavaPairRDD<Integer,Integer> getTopCandidatePerEntity(JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates) {
+    public JavaPairRDD<Integer,Integer> getTopCandidatePerEntity(JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates, LongAccumulator LISTS_WITH_COMMON_CANDIDATES) {
         return topKValueCandidates                
                 .mapValues(x -> new IntArrayList(Utils.sortByValue(x, true).keySet())) //sort the int2floatopenhashmap and get the keys (entityIds) sorted by values (value similarity) (descending)                
                 .fullOuterJoin(topKNeighborCandidates)
-                .mapValues(x -> top1Borda(x))
+                .mapValues(x -> top1Borda(x, LISTS_WITH_COMMON_CANDIDATES))
                 .filter((x -> x._2() != null));
     }
     
-    public Integer top1Borda(Tuple2<Optional<IntArrayList>, Optional<IntArrayList>> lists) {
+    public Integer top1Borda(Tuple2<Optional<IntArrayList>, Optional<IntArrayList>> lists, LongAccumulator LISTS_WITH_COMMON_CANDIDATES) {
         IntArrayList list1 = lists._1().orNull();
-        IntArrayList list2 = lists._2().orNull();
-        
-        //still don't know why those empty checks are needed...
-        /*
-        if (list1 != null && list1.isEmpty()) {
-            list1 = null;
-        }
-        if (list2 != null && list2.isEmpty()) {
-            list2 = null;
-        }*/
+        IntArrayList list2 = lists._2().orNull();        
         
         if (list1 == null && list2 == null) {
             return null;
@@ -82,17 +74,24 @@ public class LocalRankAggregation implements Serializable {
         }
         
         //find common elements and elements only in list1
+        boolean commonElementFound = false;
         int currScore = maxSize;
         for (int element1 : list1) {
             int score1 = currScore--;
             int indexIn2 = list2.indexOf(element1);
             if (indexIn2 == -1) {
                 indexIn2 = size1; //check this value for non-existing elements in second list. set to size1 to always ignore such elements, set to size2 to add as last of queue2
+            } else {
+                commonElementFound = true;
             }
             int score2 = size1-indexIn2; //(size2-list2.indexOf(element1))+(size1-size2);           
             if (score1+score2 > top1._2()) {
                 top1 = new Tuple2<>(element1, score1+score2);
             }
+        }
+        
+        if (commonElementFound) {
+            LISTS_WITH_COMMON_CANDIDATES.add(1);
         }
         
         //the following is not needed in case we always prefer the first list

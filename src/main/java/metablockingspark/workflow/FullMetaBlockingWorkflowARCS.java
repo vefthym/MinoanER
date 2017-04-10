@@ -22,16 +22,14 @@ import java.net.URISyntaxException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import metablockingspark.matching.ReciprocalMatching;
-import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighbors;
+import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighborsARCS;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
-import metablockingspark.preprocessing.EntityWeightsWJS;
 import metablockingspark.rankAggregation.LocalRankAggregation;
 import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.util.LongAccumulator;
 
@@ -39,7 +37,7 @@ import org.apache.spark.util.LongAccumulator;
  *
  * @author vefthym
  */
-public class FullMetaBlockingWorkflow {
+public class FullMetaBlockingWorkflowARCS {
     
     
     
@@ -90,7 +88,7 @@ public class FullMetaBlockingWorkflow {
             return;
         }
         
-        String appName = "FullMetaBlocking WJS on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1);
+        String appName = "FullMetaBlocking ARCS on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1);
         SparkSession spark = Utils.setUpSpark(appName, 3, tmpPath);
         int PARALLELISM = spark.sparkContext().getConf().getInt("spark.default.parallelism", 152);        
         JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext()); 
@@ -114,14 +112,9 @@ public class FullMetaBlockingWorkflow {
         LongAccumulator NUM_COMPARISONS_ACCUM = jsc.sc().longAccumulator();        
         BlocksFromEntityIndex bFromEI = new BlocksFromEntityIndex();
         JavaPairRDD<Integer, IntArrayList> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
-        blocksFromEI.setName("blocksFromEI").cache(); //a few hundred MBs
+        blocksFromEI.setName("blocksFromEI").cache(); //a few hundred MBs        
         
-        
-        //get the total weights of each entity, required by WJS weigthing scheme (only)
-        System.out.println("\n\nStarting EntityWeightsWJS...");
-        EntityWeightsWJS wjsWeights = new EntityWeightsWJS();                
-        Int2FloatOpenHashMap totalWeights = new Int2FloatOpenHashMap(wjsWeights.getWeights(blocksFromEI, entityIndex).collectAsMap()); //action
-        Broadcast<Int2FloatOpenHashMap> totalWeights_BV = jsc.broadcast(totalWeights);        
+        System.out.println(blocksFromEI.count()+" have been left after block filtering");
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
         final int K = ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
@@ -133,11 +126,6 @@ public class FullMetaBlockingWorkflow {
         
         entityIndex.unpersist();
         
-        long numNegativeEntities = wjsWeights.getNumNegativeEntities();
-        long numPositiveEntities = wjsWeights.getNumPositiveEntities();        
-        System.out.println("Found "+numNegativeEntities+" negative entities");
-        System.out.println("Found "+numPositiveEntities+" positive entities");
-        
         //CNP
         System.out.println("\n\nStarting CNP...");
         String SEPARATOR = (inputTriples1.endsWith(".tsv"))? "\t" : " ";        
@@ -145,8 +133,8 @@ public class FullMetaBlockingWorkflow {
         final int N = 3; //for top-N neighbors
         
         System.out.println("Getting the top K value candidates...");
-        EntityBasedCNPNeighbors cnp = new EntityBasedCNPNeighbors();        
-        JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
+        EntityBasedCNPNeighborsARCS cnp = new EntityBasedCNPNeighborsARCS();        
+        JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, K);
         
         blocksFromEI.unpersist();        
         

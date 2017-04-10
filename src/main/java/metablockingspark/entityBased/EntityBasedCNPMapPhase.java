@@ -91,20 +91,20 @@ public class EntityBasedCNPMapPhase {
             
             List<Tuple2<Integer,IntArrayList>> mapResults = new ArrayList<>();
             
-            if (positives.isEmpty() || negatives.isEmpty()) {                
-                return null;                
-            }        
+            if (positives.isEmpty() || negatives.isEmpty()) {       
+                //System.out.println("One of the collections does not contain an entity in this block. Block "+block._1()+" is now filtered.");
+                return mapResults.iterator();   //return an empty iterator (i.e., return nothing)
+            } 
             
             //add as a first element to negatives the number of positives
             IntArrayList negativesToEmit = new IntArrayList();            
             negativesToEmit.add(0, positives.size());
-            negativesToEmit.addAll(negatives);
+            negativesToEmit.addAll(1, negatives);
             
             //add as a first element to positives the number of negatives
             IntArrayList positivesToEmit = new IntArrayList();
             positivesToEmit.add(0, negatives.size());
-            positivesToEmit.addAll(positives);
-            
+            positivesToEmit.addAll(1, positives);
             
             //emit all the negative entities array for each positive entity
             for (int positiveId : positives) {
@@ -118,6 +118,6 @@ public class EntityBasedCNPMapPhase {
             
             return mapResults.iterator();
         })
-        .filter(x-> x != null && x._2().size() > 1); //why does the second condition not work?
+        .filter(x-> x._2().size() > 1); //why does the second condition not work?
     }
 }

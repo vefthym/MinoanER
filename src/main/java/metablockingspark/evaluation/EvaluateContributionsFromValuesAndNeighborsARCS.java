@@ -23,17 +23,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighbors;
+import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighborsARCS;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
-import metablockingspark.preprocessing.EntityWeightsWJS;
 import metablockingspark.utils.Utils;
 import metablockingspark.workflow.FullMetaBlockingWorkflow;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.util.LongAccumulator;
 import scala.Tuple2;
@@ -42,7 +40,7 @@ import scala.Tuple2;
  *
  * @author vefthym
  */
-public class EvaluateContributionsFromValuesAndNeighbors extends BlockingEvaluation {
+public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEvaluation {
     
     public static void main(String[] args) {
         String tmpPath;        
@@ -114,18 +112,12 @@ public class EvaluateContributionsFromValuesAndNeighbors extends BlockingEvaluat
         LongAccumulator NUM_COMPARISONS_ACCUM = jsc.sc().longAccumulator();        
         BlocksFromEntityIndex bFromEI = new BlocksFromEntityIndex();
         JavaPairRDD<Integer, IntArrayList> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
-        blocksFromEI.setName("blocksFromEI").cache(); //a few hundred MBs
+        blocksFromEI.setName("blocksFromEI").cache(); //a few hundred MBs        
         
-        
-        //get the total weights of each entity, required by WJS weigthing scheme (only)
-        System.out.println("\n\nStarting EntityWeightsWJS...");
-        EntityWeightsWJS wjsWeights = new EntityWeightsWJS();        
-        Int2FloatOpenHashMap totalWeights = new Int2FloatOpenHashMap(wjsWeights.getWeights(blocksFromEI, entityIndex).collectAsMap());        
-        System.out.println("Total weights contain "+totalWeights.keySet().size()+" entity weights before broadcasting");
-        Broadcast<Int2FloatOpenHashMap> totalWeights_BV = jsc.broadcast(totalWeights);        
+        System.out.println(blocksFromEI.count()+" have been left after block filtering");
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
-        final int K = (args.length == 7) ? Integer.parseInt(args[6]) : ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
+        final int K = ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
         System.out.println(BLOCK_ASSIGNMENTS_ACCUM.value()+" block assignments");
         System.out.println(CLEAN_BLOCK_ACCUM.value()+" clean blocks");
         System.out.println(NUM_COMPARISONS_ACCUM.value()+" comparisons");
@@ -134,11 +126,6 @@ public class EvaluateContributionsFromValuesAndNeighbors extends BlockingEvaluat
         
         entityIndex.unpersist();
         
-        long numNegativeEntities = wjsWeights.getNumNegativeEntities();
-        long numPositiveEntities = wjsWeights.getNumPositiveEntities();        
-        System.out.println("Found "+numNegativeEntities+" negative entities");
-        System.out.println("Found "+numPositiveEntities+" positive entities");
-        
         //CNP
         System.out.println("\n\nStarting CNP...");
         String SEPARATOR = (inputTriples1.endsWith(".tsv"))? "\t" : " ";        
@@ -146,13 +133,13 @@ public class EvaluateContributionsFromValuesAndNeighbors extends BlockingEvaluat
         final int N = 3; //for top-N neighbors
         
         System.out.println("Getting the top K value candidates...");
-        EntityBasedCNPNeighbors cnp = new EntityBasedCNPNeighbors();        
-        JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
+        EntityBasedCNPNeighborsARCS cnp = new EntityBasedCNPNeighborsARCS();        
+        JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, K);
         
         blocksFromEI.unpersist();        
         
         System.out.println("Getting the top K neighbor candidates...");
-        JavaPairRDD<Integer, IntArrayList> topkNeighborCandidates = cnp.run(
+        JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates = cnp.run(
                 topKValueCandidates, 
                 jsc.textFile(inputTriples1, PARALLELISM), 
                 jsc.textFile(inputTriples2, PARALLELISM), 
@@ -163,10 +150,10 @@ public class EvaluateContributionsFromValuesAndNeighbors extends BlockingEvaluat
                 jsc);
         
         
-        JavaPairRDD<Integer,IntArrayList> negativeIdResults = topkNeighborCandidates
+        JavaPairRDD<Integer,IntArrayList> negativeIdResults = topKNeighborCandidates
                 .filter(x-> x._1() < 0);
         
-        JavaPairRDD<Integer, IntArrayList> positiveIdResults = topkNeighborCandidates
+        JavaPairRDD<Integer, IntArrayList> positiveIdResults = topKNeighborCandidates
                 .filter(x-> x._1() >= 0)                
                 .flatMapToPair(x -> { //swap each candidate pair to put the negative id in key and positive id in value
                     List<Tuple2<Integer,Integer>> candidates = new ArrayList<>();
@@ -195,7 +182,7 @@ public class EvaluateContributionsFromValuesAndNeighbors extends BlockingEvaluat
         LongAccumulator TPs = jsc.sc().longAccumulator("TPs");
         LongAccumulator FPs = jsc.sc().longAccumulator("FPs");
         LongAccumulator FNs = jsc.sc().longAccumulator("FNs");
-        EvaluateContributionsFromValuesAndNeighbors evaluation = new EvaluateContributionsFromValuesAndNeighbors();
+        EvaluateContributionsFromValuesAndNeighborsARCS evaluation = new EvaluateContributionsFromValuesAndNeighborsARCS();
         
         String GT_SEPARATOR = ",";
         if (groundTruthPath.contains("music")) {

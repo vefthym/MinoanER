@@ -84,7 +84,7 @@ public class EvaluateRankAggregation {
             return;
         }
         
-        String appName = "FullMetaBlocking WJS on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1);
+        String appName = "WJS rank aggregation on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1);
         SparkSession spark = Utils.setUpSpark(appName, 3, tmpPath);
         int PARALLELISM = spark.sparkContext().getConf().getInt("spark.default.parallelism", 152);        
         JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext()); 
@@ -157,10 +157,11 @@ public class EvaluateRankAggregation {
         
         //rank aggregation        
         System.out.println("Starting rank aggregation...");
-        JavaPairRDD<Integer,Integer> aggregationResults = new LocalRankAggregation().getTopCandidatePerEntity(topKValueCandidates, topKNeighborCandidates);
+        LongAccumulator LISTS_WITH_COMMON_CANDIDATES = jsc.sc().longAccumulator();
+        JavaPairRDD<Integer,Integer> aggregationResults = new LocalRankAggregation().getTopCandidatePerEntity(topKValueCandidates, topKNeighborCandidates, LISTS_WITH_COMMON_CANDIDATES);
         
-        
-        
+        long numResults = aggregationResults.count();
+        System.out.println(LISTS_WITH_COMMON_CANDIDATES.value()+"/"+numResults+" lists have at least one candidate in common");
         
         ////////////////////////
         //start the processing//
