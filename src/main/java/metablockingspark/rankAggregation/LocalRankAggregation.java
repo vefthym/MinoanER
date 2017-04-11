@@ -55,11 +55,14 @@ public class LocalRankAggregation implements Serializable {
      * @param K how many candidates to keep per entity
      * @return the top-K aggregate candidate match per entity
      */
-    public JavaPairRDD<Integer,IntArrayList> getTopKCandidatesPerEntity(JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates, LongAccumulator LISTS_WITH_COMMON_CANDIDATES, int K) {
+    public JavaPairRDD<Integer,IntArrayList> getTopKCandidatesPerEntity(JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates, LongAccumulator LISTS_WITH_COMMON_CANDIDATES, int K, 
+            LongAccumulator RESULTS_FROM_VALUES, LongAccumulator RESULTS_FROM_NEIGHBORS, LongAccumulator RESULTS_FROM_SUM, 
+            LongAccumulator RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS, LongAccumulator RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES) {
         return topKValueCandidates                
                 .mapValues(x -> new IntArrayList(Utils.sortByValue(x, true).keySet())) //sort the int2floatopenhashmap and get the keys (entityIds) sorted by values (value similarity) (descending)                
                 .fullOuterJoin(topKNeighborCandidates)
-                .mapValues(x -> topKBorda(x, LISTS_WITH_COMMON_CANDIDATES, K))
+                .mapValues(x -> topKBorda(x, LISTS_WITH_COMMON_CANDIDATES, K, 
+                        RESULTS_FROM_VALUES, RESULTS_FROM_NEIGHBORS, RESULTS_FROM_SUM, RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS, RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES))
                 .filter((x -> x._2() != null));
     }
     
@@ -132,7 +135,9 @@ public class LocalRankAggregation implements Serializable {
     }
     
     
-    public IntArrayList topKBorda(Tuple2<Optional<IntArrayList>, Optional<IntArrayList>> lists, LongAccumulator LISTS_WITH_COMMON_CANDIDATES, int K) {
+    public IntArrayList topKBorda(Tuple2<Optional<IntArrayList>, Optional<IntArrayList>> lists, LongAccumulator LISTS_WITH_COMMON_CANDIDATES, int K, 
+            LongAccumulator RESULTS_FROM_VALUES, LongAccumulator RESULTS_FROM_NEIGHBORS, LongAccumulator RESULTS_FROM_SUM, 
+            LongAccumulator RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS, LongAccumulator RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES) {
         IntArrayList list1 = lists._1().orNull();
         IntArrayList list2 = lists._2().orNull();        
         
@@ -140,9 +145,11 @@ public class LocalRankAggregation implements Serializable {
             return null;
         } else if (list2 == null) {
             //System.out.println("The only candidate (from values) is :"+list1.get(0));
+            RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS.add(Math.min(K, list1.size()));
             return new IntArrayList(list1.subList(0, Math.min(K, list1.size())));
         } else if (list1 == null) {
             //System.out.println("The only candidate (from neighbors) is :"+list2.get(0));
+            RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES.add(Math.min(K, list2.size()));
             return new IntArrayList(list2.subList(0, Math.min(K, list2.size())));
         }
         
@@ -152,11 +159,12 @@ public class LocalRankAggregation implements Serializable {
         int maxSize = Math.max(size1, size2);
         
         //assign the biggest list to list1        
+        /*
         if (size2 > size1) {
             list1 = list2;
             list2 = lists._1().get();            
             size1 = maxSize;            
-        }
+        }*/
         
         //find common elements and elements only in list1
         boolean commonElementFound = false;
@@ -167,8 +175,10 @@ public class LocalRankAggregation implements Serializable {
             int indexIn2 = list2.indexOf(element1);
             if (indexIn2 == -1) {
                 indexIn2 = size1; //check this value for non-existing elements in second list. set to size1 to always ignore such elements, set to size2 to add as last of queue2
+                RESULTS_FROM_VALUES.add(1);
             } else {
                 commonElementFound = true;
+                RESULTS_FROM_SUM.add(1);
             }
             int score2 = size1-indexIn2; //(size2-list2.indexOf(element1))+(size1-size2);           
             int score = score1+score2;
@@ -190,6 +200,7 @@ public class LocalRankAggregation implements Serializable {
             int score2 = currScore--;
             int indexIn1 = list1.indexOf(element2);
             if (indexIn1 == -1) {
+                RESULTS_FROM_NEIGHBORS.add(1);
                 pq.add(new ComparableIntFloatPair(element2, score2));
                 if (pq.size() > K) {
                     pq.poll();

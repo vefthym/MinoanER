@@ -113,7 +113,7 @@ public class BlockFilteringAdvanced {
                     inverseBlocks.put(block._2(), block._1());
                     numBlocks++;
                 }
-                final int MAX_BLOCKS = ((Double)Math.floor(3*numBlocks/4+1)).intValue(); //|_ 3|Bi|/4+1 _| //preprocessing
+                final int MAX_BLOCKS = (int) Math.round(0.8 * numBlocks);
 
                 //keep MAX_BLOCKS blocks per entity
                 IntArrayList entityIndex = new IntArrayList();                

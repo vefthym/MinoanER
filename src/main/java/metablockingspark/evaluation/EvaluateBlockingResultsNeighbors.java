@@ -124,7 +124,7 @@ public class EvaluateBlockingResultsNeighbors extends BlockingEvaluation {
         Broadcast<Int2FloatOpenHashMap> totalWeights_BV = jsc.broadcast(totalWeights);        
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
-        final int K = (args.length == 7) ? Integer.parseInt(args[6]) : ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
+        final int K = (args.length == 7) ? Integer.parseInt(args[6]) : Math.max(1, ((Double)Math.floor(BCin)).intValue()); //K = |_BCin -1_|
         System.out.println(BLOCK_ASSIGNMENTS_ACCUM.value()+" block assignments");
         System.out.println(CLEAN_BLOCK_ACCUM.value()+" clean blocks");
         System.out.println(NUM_COMPARISONS_ACCUM.value()+" comparisons");

@@ -94,7 +94,7 @@ public class MetaBlockingOnlyValuesCBS {
         blocksFromEI.count(); //the simplest action just to run blocksFromEI and get the actual value for the counters below
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
-        final int K = ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
+        final int K = Math.max(1, ((Double)Math.floor(BCin)).intValue()); //K = |_BCin -1_|
         System.out.println(BLOCK_ASSIGNMENTS_ACCUM.value()+" block assignments");
         System.out.println(CLEAN_BLOCK_ACCUM.value()+" clean blocks");
         System.out.println(NUM_COMPARISONS_ACCUM.value()+" comparisons");

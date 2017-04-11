@@ -110,7 +110,7 @@ public class EvaluateTopKRankAggregationARCS {
         System.out.println(blocksFromEI.count()+" have been left after block filtering");
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
-        final int K = ((Double)Math.floor(BCin - 1)).intValue(); //K = |_BCin -1_|
+        final int K = Math.max(1, ((Double)Math.floor(BCin)).intValue()); //K = |_BCin -1_|
         System.out.println(BLOCK_ASSIGNMENTS_ACCUM.value()+" block assignments");
         System.out.println(CLEAN_BLOCK_ACCUM.value()+" clean blocks");
         System.out.println(NUM_COMPARISONS_ACCUM.value()+" comparisons");
@@ -147,17 +147,32 @@ public class EvaluateTopKRankAggregationARCS {
         //rank aggregation        
         System.out.println("Starting rank aggregation, keeping top "+L+" aggregate candidates per entity...");
         LongAccumulator LISTS_WITH_COMMON_CANDIDATES = jsc.sc().longAccumulator();
+        
+        LongAccumulator RESULTS_FROM_VALUES = jsc.sc().longAccumulator(); 
+        LongAccumulator RESULTS_FROM_NEIGHBORS = jsc.sc().longAccumulator(); 
+        LongAccumulator RESULTS_FROM_SUM = jsc.sc().longAccumulator(); 
+        LongAccumulator RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS = jsc.sc().longAccumulator();
+        LongAccumulator RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES = jsc.sc().longAccumulator();
+        
         JavaPairRDD<Integer,IntArrayList> aggregationResults = 
                 new LocalRankAggregation().getTopKCandidatesPerEntity(
                         topKValueCandidates, 
                         topKNeighborCandidates, 
                         LISTS_WITH_COMMON_CANDIDATES, 
-                        L);
+                        L, 
+                        RESULTS_FROM_VALUES,RESULTS_FROM_NEIGHBORS,RESULTS_FROM_SUM,RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS,RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES);
         
         aggregationResults.cache();
         long numResults = aggregationResults.count();
         System.out.println(LISTS_WITH_COMMON_CANDIDATES.value()+"/"+numResults+" lists have at least one candidate in common");
         
+        System.out.println(RESULTS_FROM_VALUES.value()+" RESULTS_FROM_VALUES");
+        System.out.println(RESULTS_FROM_NEIGHBORS.value()+" RESULTS_FROM_NEIGHBORS");
+        System.out.println(RESULTS_FROM_SUM.value()+" RESULTS_FROM_SUM");
+        System.out.println(RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS.value()+" RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS");
+        System.out.println(RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES.value()+" RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES");
+        
+        System.out.println((RESULTS_FROM_VALUES.value()+RESULTS_FROM_NEIGHBORS.value()+RESULTS_FROM_SUM.value()+RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS.value()+RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES.value())+" total results");
                 
         System.out.println("Starting the evaluation...");             
         
