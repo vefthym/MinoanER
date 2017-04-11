@@ -140,18 +140,16 @@ public class LocalRankAggregation implements Serializable {
             return null;
         } else if (list2 == null) {
             //System.out.println("The only candidate (from values) is :"+list1.get(0));
-            return new IntArrayList(list1.subList(0, K));
+            return new IntArrayList(list1.subList(0, Math.min(K, list1.size())));
         } else if (list1 == null) {
             //System.out.println("The only candidate (from neighbors) is :"+list2.get(0));
-            return new IntArrayList(list2.subList(0, K));
+            return new IntArrayList(list2.subList(0, Math.min(K, list2.size())));
         }
         
         int size1 = list1.size();
         int size2 = list2.size();
         
         int maxSize = Math.max(size1, size2);
-        
-        Tuple2<Integer, Integer> top1 = new Tuple2<>(list1.get(0), maxSize); //(entityId, score) default winner is the first element of the first list (from values)
         
         //assign the biggest list to list1        
         if (size2 > size1) {

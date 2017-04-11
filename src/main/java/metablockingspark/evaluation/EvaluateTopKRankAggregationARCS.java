@@ -76,7 +76,8 @@ public class EvaluateTopKRankAggregationARCS {
                     + "2: inputTriples2 (raw rdf triples)"
                     + "3: entityIds1: entityUrl\tentityId (positive)"
                     + "4: entityIds2: entityUrl\tentityId (also positive)"
-                    + "5: ground truth path");
+                    + "5: ground truth path"
+                    + "6: L (num of aggregation results to keep)");
             return;
         }
         
@@ -141,15 +142,17 @@ public class EvaluateTopKRankAggregationARCS {
                 MIN_SUPPORT_THRESHOLD, K, N, 
                 jsc);
         
+        final int L = (args.length == 7) ? Integer.parseInt(args[6]) : 5; //the default value is 5
+        
         //rank aggregation        
-        System.out.println("Starting rank aggregation...");
+        System.out.println("Starting rank aggregation, keeping top "+L+" aggregate candidates per entity...");
         LongAccumulator LISTS_WITH_COMMON_CANDIDATES = jsc.sc().longAccumulator();
         JavaPairRDD<Integer,IntArrayList> aggregationResults = 
                 new LocalRankAggregation().getTopKCandidatesPerEntity(
                         topKValueCandidates, 
                         topKNeighborCandidates, 
                         LISTS_WITH_COMMON_CANDIDATES, 
-                        5); //K
+                        L);
         
         aggregationResults.cache();
         long numResults = aggregationResults.count();
@@ -172,7 +175,7 @@ public class EvaluateTopKRankAggregationARCS {
                 .flatMapToPair(x -> {
                     List<Tuple2<Integer,Integer>> candidates = new ArrayList<>();
                     for (int candidate : x._2()) {
-                        candidates.add(new Tuple2<>(candidate, x._1()));
+                        candidates.add(new Tuple2<>(candidate, x._1())); //reverse the pairs
                     }
                     return candidates.iterator();
                 })
@@ -180,6 +183,9 @@ public class EvaluateTopKRankAggregationARCS {
                         (x,y) -> {x.add(y); return x;}, 
                         (x,y) -> {x.addAll(y); return x;})
                 .mapValues(x-> new IntArrayList(x));
+        
+        negativeIdResults.cache();
+        positiveIdResults.cache();
         
         JavaPairRDD<Integer,IntArrayList> aggregationResultsFinal = 
                 negativeIdResults.fullOuterJoin(positiveIdResults)
@@ -192,20 +198,35 @@ public class EvaluateTopKRankAggregationARCS {
                 });
         
         //Start the evaluation        
-        LongAccumulator TPs = jsc.sc().longAccumulator("TPs");
-        LongAccumulator FPs = jsc.sc().longAccumulator("FPs");
-        LongAccumulator FNs = jsc.sc().longAccumulator("FNs");        
-        EvaluateBlockingResults blockingEvaluation = new EvaluateBlockingResults();
-        
         JavaPairRDD<Integer,Integer> gt = Utils.getGroundTruthIdsFromEntityIds(jsc.textFile(entityIds1, PARALLELISM), jsc.textFile(entityIds2, PARALLELISM), jsc.textFile(groundTruthPath), GT_SEPARATOR);
         gt.cache();        
         
         System.out.println("Finished loading the ground truth with "+ gt.count()+" matches, now evaluating the results...");
         
-        blockingEvaluation.evaluateBlockingResults(aggregationResultsFinal, gt, TPs, FPs, FNs, false);
-        System.out.println("\nPositive entity ids results:");
-        System.out.println("Found "+aggregationResultsFinal.count()+" positive entities to be matched");
-        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
+        LongAccumulator TPs = jsc.sc().longAccumulator("TPs");
+        LongAccumulator FPs = jsc.sc().longAccumulator("FPs");
+        LongAccumulator FNs = jsc.sc().longAccumulator("FNs");        
+        EvaluateBlockingResults blockingEvaluation = new EvaluateBlockingResults();
+        
+        blockingEvaluation.evaluateBlockingResults(aggregationResultsFinal, gt, TPs, FPs, FNs, false);        
+        System.out.println("Found "+aggregationResultsFinal.count()+" entities to be matched");
+        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());           
+        
+        TPs.reset();
+        FPs.reset();
+        FNs.reset();
+        
+        blockingEvaluation.evaluateBlockingResults(negativeIdResults, gt, TPs, FPs, FNs, false);        
+        System.out.println("\nFound "+negativeIdResults.count()+" entities to be matched from negative entities");
+        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());           
+        
+        TPs.reset();
+        FPs.reset();
+        FNs.reset();
+        
+        blockingEvaluation.evaluateBlockingResults(positiveIdResults, gt, TPs, FPs, FNs, false);        
+        System.out.println("\nFound "+positiveIdResults.count()+" entities to be matched from positive entities");
+        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());           
         
         spark.stop();
     }

@@ -15,13 +15,14 @@
  */
 package metablockingspark.utils;
 
+import java.io.Serializable;
 import java.util.Comparator;
 
 /**
  *
  * @author vefthym
  */
-public class ComparableIntFloatPairDescendingComparator implements Comparator<ComparableIntFloatPair> {
+public class ComparableIntFloatPairDescendingComparator implements Comparator<ComparableIntFloatPair>, Serializable {
 
     @Override
     public int compare(ComparableIntFloatPair o1, ComparableIntFloatPair o2) {
