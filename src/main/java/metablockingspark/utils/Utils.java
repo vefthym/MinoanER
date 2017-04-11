@@ -234,17 +234,19 @@ public class Utils {
         }
         return uri;
     }
+    
     /**
      * Used in cases where a priority queue has been used to keep top K elements, and then its results are needed in descending order, 
      * in the form of an IntArrayList. The size of the results is equal to the size of the input.
+     * @param <T> any subclass of ComparableIntFloatPair
      * @param pq
      * @return 
      */
-    public static IntArrayList toIntArrayListReversed(PriorityQueue<ComparableIntFloatPair> pq) {
+    public static <T extends ComparableIntFloatPair> IntArrayList toIntArrayListReversed(PriorityQueue<T> pq) {
         int i = pq.size();   
         int[] candidates = new int[i]; 
         while (!pq.isEmpty()) {
-            ComparableIntFloatPair cand = pq.poll();
+            T cand = pq.poll();
             candidates[--i] = cand.getEntityId(); //get pq elements in reverse order
         }
         return new IntArrayList(candidates);

@@ -24,8 +24,8 @@ import scala.Tuple2;
  */
 public class ComparableIntFloatPair implements Comparable<ComparableIntFloatPair>, java.io.Serializable {
     // public final fields ok for this small example
-    private final int entityId;
-    private final float value;    
+    protected final int entityId;
+    protected final float value;    
 
     public ComparableIntFloatPair(Tuple2<Integer,Float> input) {
         this.entityId = input._1();

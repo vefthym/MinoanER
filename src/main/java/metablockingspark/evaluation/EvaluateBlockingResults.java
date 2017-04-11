@@ -21,12 +21,14 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.PriorityQueue;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighbors;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
 import metablockingspark.preprocessing.EntityWeightsWJS;
+import metablockingspark.utils.ComparableIntFloatPairDUMMY;
 import metablockingspark.utils.Utils;
 import metablockingspark.workflow.FullMetaBlockingWorkflow;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
@@ -212,8 +214,5 @@ public class EvaluateBlockingResults extends BlockingEvaluation {
         
         spark.stop();
     }
-    
-    
-    
     
 }

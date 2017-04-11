@@ -124,16 +124,14 @@ public class EntityBasedCNPMapPhaseTest {
         JavaPairRDD<Integer, IntArrayList> result = EntityBasedCNPMapPhase.getMapOutputWJS(filteredBlocks);
         
         List<Tuple2<Integer,IntArrayList>> expResult = new ArrayList<>();
-        expResult.add(new Tuple2<>(4, new IntArrayList(new int[]{5, -2, -1, -5, -4, -3})));
-        expResult.add(new Tuple2<>(1, new IntArrayList(new int[]{5, -2, -1, -5, -4, -3})));
-        expResult.add(new Tuple2<>(3, new IntArrayList(new int[]{5, -2, -1, -5, -4, -3})));
-        expResult.add(new Tuple2<>(5, new IntArrayList(new int[]{5, -2, -1, -5, -4, -3})));
-        expResult.add(new Tuple2<>(2, new IntArrayList(new int[]{5, -2, -1, -5, -4, -3})));
-        expResult.add(new Tuple2<>(-2, new IntArrayList(new int[]{5, 4, 1, 3, 5, 2})));
-        expResult.add(new Tuple2<>(-1, new IntArrayList(new int[]{5, 4, 1, 3, 5, 2})));
-        expResult.add(new Tuple2<>(-5, new IntArrayList(new int[]{5, 4, 1, 3, 5, 2})));
-        expResult.add(new Tuple2<>(-4, new IntArrayList(new int[]{5, 4, 1, 3, 5, 2})));
-        expResult.add(new Tuple2<>(-3, new IntArrayList(new int[]{5, 4, 1, 3, 5, 2})));
+        expResult.add(new Tuple2<>(4, new IntArrayList(new int[]{4, -2, -1, -4, -3})));
+        expResult.add(new Tuple2<>(1, new IntArrayList(new int[]{4, -2, -1, -4, -3})));
+        expResult.add(new Tuple2<>(3, new IntArrayList(new int[]{4, -2, -1, -4, -3})));
+        expResult.add(new Tuple2<>(2, new IntArrayList(new int[]{4, -2, -1, -4, -3})));        
+        expResult.add(new Tuple2<>(-2, new IntArrayList(new int[]{4, 4, 1, 3, 2})));
+        expResult.add(new Tuple2<>(-1, new IntArrayList(new int[]{4, 4, 1, 3, 2})));        
+        expResult.add(new Tuple2<>(-4, new IntArrayList(new int[]{4, 4, 1, 3, 2})));
+        expResult.add(new Tuple2<>(-3, new IntArrayList(new int[]{4, 4, 1, 3, 2})));
         expResult.add(new Tuple2<>(4, new IntArrayList(new int[]{3, -1, -5})));
         expResult.add(new Tuple2<>(3, new IntArrayList(new int[]{3, -1, -5})));
         expResult.add(new Tuple2<>(5, new IntArrayList(new int[]{3, -1, -5})));

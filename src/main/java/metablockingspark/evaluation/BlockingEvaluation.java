@@ -15,6 +15,9 @@
  */
 package metablockingspark.evaluation;
 
+import java.util.PriorityQueue;
+import metablockingspark.utils.ComparableIntFloatPairDUMMY;
+import metablockingspark.utils.ComparableIntFloatPairDUMMY.TYPE;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
@@ -62,6 +65,56 @@ public abstract class BlockingEvaluation {
                 });
     }
     
+    
+    public void evaluateBlockingResultsDEBUGGING(JavaPairRDD<Integer,PriorityQueue<ComparableIntFloatPairDUMMY>> blockingResults, JavaPairRDD<Integer,Integer> groundTruth, LongAccumulator TPs, LongAccumulator FPs, LongAccumulator FNs, boolean verbose, 
+            LongAccumulator RESULTS_FROM_VALUES, LongAccumulator RESULTS_FROM_NEIGHBORS, LongAccumulator RESULTS_FROM_SUM, LongAccumulator RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS, LongAccumulator RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES) {
+        blockingResults
+                .fullOuterJoin(groundTruth)
+                .foreach(joinedMatch -> {
+                    PriorityQueue<ComparableIntFloatPairDUMMY> myCandidates = joinedMatch._2()._1().orElse(null);
+                    Integer correctResult = joinedMatch._2()._2().orElse(null);
+                    if (myCandidates == null) { //this means that the correct result is not null (otherwise, nothing to join here)
+                        FNs.add(1); //missed match
+                        if (verbose) {
+                            System.out.println("FN: Did not provide any match for "+joinedMatch._1());
+                        }
+                    } else if (correctResult == null) {
+                        FPs.add(myCandidates.size()); //each candidate is a false match (no candidate should exist)
+                    } else {
+                        boolean found = false;
+                        for (ComparableIntFloatPairDUMMY myCandidate : myCandidates) {
+                            if (myCandidate.getEntityId() == correctResult) {
+                                TPs.add(1);
+                                found = true;
+                                switch (myCandidate.getType()) {                                    
+                                    case VALUES:
+                                        RESULTS_FROM_VALUES.add(1);
+                                        break;
+                                    case NEIGHBORS:
+                                        RESULTS_FROM_NEIGHBORS.add(1);
+                                        break;
+                                    case BOTH:
+                                        RESULTS_FROM_SUM.add(1);
+                                        break;
+                                    case VALUES_WITH_EMPTY_NEIGHBORS:
+                                        RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS.add(1);
+                                        break;
+                                    case NEIGHBORS_WITH_EMPTY_VALUES:
+                                        RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES.add(1);
+                                        break;
+                                    default:
+                                        break;     
+                                }
+                            } else {
+                                FPs.add(1);
+                            }
+                        }
+                        if (!found) {
+                            FNs.add(1);
+                        }                                         
+                    }
+                });
+    }
     
     
     

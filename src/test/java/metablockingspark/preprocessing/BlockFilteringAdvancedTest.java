@@ -101,12 +101,12 @@ public class BlockFilteringAdvancedTest {
         expResult.add(new Tuple2<>(2, new IntArrayList(new int[]{0})));
         expResult.add(new Tuple2<>(3, new IntArrayList(new int[]{1,0})));
         expResult.add(new Tuple2<>(4, new IntArrayList(new int[]{1,0})));
-        expResult.add(new Tuple2<>(5, new IntArrayList(new int[]{2,1,0})));
+        expResult.add(new Tuple2<>(5, new IntArrayList(new int[]{2,1})));
         expResult.add(new Tuple2<>(-1, new IntArrayList(new int[]{1,0})));
         expResult.add(new Tuple2<>(-2, new IntArrayList(new int[]{0})));
         expResult.add(new Tuple2<>(-3, new IntArrayList(new int[]{0})));
         expResult.add(new Tuple2<>(-4, new IntArrayList(new int[]{0})));
-        expResult.add(new Tuple2<>(-5, new IntArrayList(new int[]{2,1,0})));
+        expResult.add(new Tuple2<>(-5, new IntArrayList(new int[]{2,1})));
         
         JavaPairRDD<Integer,IntArrayList> expResultRDD = jsc.parallelizePairs(expResult);
         
@@ -117,7 +117,7 @@ public class BlockFilteringAdvancedTest {
         System.out.println("Expect: "+Arrays.toString(expResultList.toArray()));
         
         assertEquals(new HashSet<>(resultList), new HashSet<>(expResultList));
-        assertEquals((long)BLOCK_ASSIGNMENTS.value(), 17);
+        assertEquals((long)BLOCK_ASSIGNMENTS.value(), 15);
     }
 
     /**
@@ -232,17 +232,17 @@ public class BlockFilteringAdvancedTest {
         //final int MAX_BLOCKS = ((Double)Math.floor(3*numBlocks/4+1)).intValue(); //|_ 3|Bi|/4+1 _| //preprocessing
         
         List<Tuple2<Integer,IntArrayList>> expResult = new ArrayList<>();
-        expResult.add(new Tuple2<>(1, new IntArrayList(new int[]{0})));
-        expResult.add(new Tuple2<>(2, new IntArrayList(new int[]{0})));
-        expResult.add(new Tuple2<>(3, new IntArrayList(new int[]{1,0})));
-        expResult.add(new Tuple2<>(4, new IntArrayList(new int[]{1,0})));
-        expResult.add(new Tuple2<>(5, new IntArrayList(new int[]{2,1,0})));
-        expResult.add(new Tuple2<>(-1, new IntArrayList(new int[]{1,0})));
         expResult.add(new Tuple2<>(-2, new IntArrayList(new int[]{0})));
+        expResult.add(new Tuple2<>(4, new IntArrayList(new int[]{1,0})));
+        expResult.add(new Tuple2<>(-1, new IntArrayList(new int[]{1,0})));
+        expResult.add(new Tuple2<>(-5, new IntArrayList(new int[]{2,1})));
+        expResult.add(new Tuple2<>(-4, new IntArrayList(new int[]{0})));        
+        expResult.add(new Tuple2<>(1, new IntArrayList(new int[]{0})));
         expResult.add(new Tuple2<>(-3, new IntArrayList(new int[]{0})));
-        expResult.add(new Tuple2<>(-4, new IntArrayList(new int[]{0})));
-        expResult.add(new Tuple2<>(-5, new IntArrayList(new int[]{2,1,0})));
-        
+        expResult.add(new Tuple2<>(3, new IntArrayList(new int[]{1,0})));
+        expResult.add(new Tuple2<>(5, new IntArrayList(new int[]{2,1})));
+        expResult.add(new Tuple2<>(2, new IntArrayList(new int[]{0})));
+               
         JavaPairRDD<Integer,IntArrayList> expResultRDD = jsc.parallelizePairs(expResult);
         
         List<Tuple2<Integer, IntArrayList>> resultList = result.collect();
@@ -252,6 +252,6 @@ public class BlockFilteringAdvancedTest {
         System.out.println("Expect: "+Arrays.toString(expResultList.toArray()));
         
         assertEquals(new HashSet<>(resultList), new HashSet<>(expResultList));        
-        assertEquals((long)BLOCK_ASSIGNMENTS.value(), 17);
+        assertEquals((long)BLOCK_ASSIGNMENTS.value(), 15);
     }
 }

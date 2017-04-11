@@ -20,10 +20,12 @@ import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.PriorityQueue;
 import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighborsARCS;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
 import metablockingspark.rankAggregation.LocalRankAggregation;
+import metablockingspark.utils.ComparableIntFloatPairDUMMY;
 import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
@@ -36,7 +38,7 @@ import scala.Tuple2;
  *
  * @author vefthym
  */
-public class EvaluateTopKRankAggregationARCS {
+public class EvaluateTopKRankAggregationARCSDEBUGGING {
     
     
     
@@ -154,8 +156,8 @@ public class EvaluateTopKRankAggregationARCS {
         LongAccumulator RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS = jsc.sc().longAccumulator();
         LongAccumulator RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES = jsc.sc().longAccumulator();
         
-        JavaPairRDD<Integer,IntArrayList> aggregationResults = 
-                new LocalRankAggregation().getTopKCandidatesPerEntity(
+        JavaPairRDD<Integer,PriorityQueue<ComparableIntFloatPairDUMMY>> aggregationResults = 
+                new LocalRankAggregation().getTopKCandidatesPerEntityDEBUGGING(
                         topKValueCandidates, 
                         topKNeighborCandidates, 
                         LISTS_WITH_COMMON_CANDIDATES, 
@@ -182,14 +184,14 @@ public class EvaluateTopKRankAggregationARCS {
         }
         
         //load the results        
-        JavaPairRDD<Integer,IntArrayList> negativeIdResults = aggregationResults
+        JavaPairRDD<Integer,PriorityQueue<ComparableIntFloatPairDUMMY>> negativeIdResults = aggregationResults
                 .filter(x-> x._1() < 0);
         
-        JavaPairRDD<Integer, IntArrayList> positiveIdResults = aggregationResults
+        JavaPairRDD<ComparableIntFloatPairDUMMY, IntArrayList> positiveIdResults = aggregationResults
                 .filter(x-> x._1() >= 0)                
                 .flatMapToPair(x -> {
-                    List<Tuple2<Integer,Integer>> candidates = new ArrayList<>();
-                    for (int candidate : x._2()) {
+                    List<Tuple2<ComparableIntFloatPairDUMMY,Integer>> candidates = new ArrayList<>();
+                    for (ComparableIntFloatPairDUMMY candidate : x._2()) {
                         candidates.add(new Tuple2<>(candidate, x._1())); //reverse the pairs
                     }
                     return candidates.iterator();
@@ -202,15 +204,13 @@ public class EvaluateTopKRankAggregationARCS {
         negativeIdResults.cache();
         positiveIdResults.cache();
         
-        JavaPairRDD<Integer,IntArrayList> aggregationResultsFinal = 
-                negativeIdResults.fullOuterJoin(positiveIdResults)
-                .mapValues(x-> {
-                    IntArrayList list1 = x._1().orElse(new IntArrayList());
-                    IntArrayList list2 = x._2().orElse(new IntArrayList());
-                    IntOpenHashSet resultSet = new IntOpenHashSet(list1);
-                    resultSet.addAll(list2);
-                    return new IntArrayList(resultSet);
-                });
+        
+        RESULTS_FROM_VALUES.reset();
+        RESULTS_FROM_NEIGHBORS.reset();
+        RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES.reset();
+        RESULTS_FROM_SUM.reset();
+        RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS.reset();
+        
         
         //Start the evaluation        
         JavaPairRDD<Integer,Integer> gt = Utils.getGroundTruthIdsFromEntityIds(jsc.textFile(entityIds1, PARALLELISM), jsc.textFile(entityIds2, PARALLELISM), jsc.textFile(groundTruthPath), GT_SEPARATOR);
@@ -222,27 +222,31 @@ public class EvaluateTopKRankAggregationARCS {
         LongAccumulator FPs = jsc.sc().longAccumulator("FPs");
         LongAccumulator FNs = jsc.sc().longAccumulator("FNs");        
         EvaluateBlockingResults blockingEvaluation = new EvaluateBlockingResults();
-        
-        blockingEvaluation.evaluateBlockingResults(aggregationResultsFinal, gt, TPs, FPs, FNs, false);        
-        System.out.println("Found "+aggregationResultsFinal.count()+" entities to be matched");
-        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());           
+//        
+//        blockingEvaluation.evaluateBlockingResults(aggregationResultsFinal, gt, TPs, FPs, FNs, false);        
+//        System.out.println("Found "+aggregationResultsFinal.count()+" entities to be matched");
+//        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());           
         
         TPs.reset();
         FPs.reset();
         FNs.reset();
         
-        blockingEvaluation.evaluateBlockingResults(negativeIdResults, gt, TPs, FPs, FNs, false);        
+        blockingEvaluation.evaluateBlockingResultsDEBUGGING(negativeIdResults, gt, TPs, FPs, FNs, false, RESULTS_FROM_VALUES, RESULTS_FROM_NEIGHBORS, RESULTS_FROM_SUM, RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS, RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES);
         System.out.println("\nFound "+negativeIdResults.count()+" entities to be matched from negative entities");
         EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());           
         
-        TPs.reset();
-        FPs.reset();
-        FNs.reset();
+        System.out.println(RESULTS_FROM_VALUES.value()+" RESULTS_FROM_VALUES");
+        System.out.println(RESULTS_FROM_NEIGHBORS.value()+" RESULTS_FROM_NEIGHBORS");
+        System.out.println(RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS.value()+" RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS");
+        System.out.println(RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES.value()+" RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES");
+        System.out.println(RESULTS_FROM_SUM.value()+" RESULTS_FROM_SUM"); 
         
-        blockingEvaluation.evaluateBlockingResults(positiveIdResults, gt, TPs, FPs, FNs, false);        
-        System.out.println("\nFound "+positiveIdResults.count()+" entities to be matched from positive entities");
-        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());           
-        
+        System.out.println((RESULTS_FROM_VALUES.value()+RESULTS_FROM_NEIGHBORS.value()+RESULTS_FROM_SUM.value()+RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS.value()+RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES.value())+" total results");
+//        
+//        blockingEvaluation.evaluateBlockingResults(positiveIdResults, gt, TPs, FPs, FNs, false);        
+//        System.out.println("\nFound "+positiveIdResults.count()+" entities to be matched from positive entities");
+//        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());           
+//        
         spark.stop();
     }
     

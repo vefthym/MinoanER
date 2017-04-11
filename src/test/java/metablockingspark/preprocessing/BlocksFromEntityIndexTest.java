@@ -99,7 +99,7 @@ public class BlocksFromEntityIndexTest {
         JavaPairRDD<Integer, IntArrayList> result = instance.run(entityIndex, cleanBlocksAccum, numComparisons);
         
         List<Tuple2<Integer,IntArrayList>> expResult = new ArrayList<>();
-        expResult.add(new Tuple2<>(0, new IntArrayList(new int[]{1,2,3,4,5,-1,-2,-3,-4,-5})));
+        expResult.add(new Tuple2<>(0, new IntArrayList(new int[]{1,2,3,4,-1,-2,-3,-4})));
         expResult.add(new Tuple2<>(1, new IntArrayList(new int[]{3,4,5,-1,-5})));
         expResult.add(new Tuple2<>(2, new IntArrayList(new int[]{5,-5})));      
         
@@ -115,7 +115,7 @@ public class BlocksFromEntityIndexTest {
         System.out.println("Expect: "+Arrays.toString(expResultList.toArray()));
         
         assertEquals((long)cleanBlocksAccum.value(), 3);
-        assertEquals((long)numComparisons.value(), 32);
+        assertEquals((long)numComparisons.value(), 23);
         assertEquals(new HashSet<>(resultList), new HashSet<>(expResultList));
         
         //assertEquals(expResultRDD, result);
