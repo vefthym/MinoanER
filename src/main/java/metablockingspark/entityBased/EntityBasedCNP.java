@@ -90,9 +90,4 @@ public class EntityBasedCNP implements Serializable {
                     return new Tuple2<Integer,IntArrayList>(entityId, new IntArrayList(candidateMatchesSorted));
                 });               
     }
-    
-    private int getNumNegativeEntitiesInBlock(IntArrayList candidates) {        
-        return (int) candidates.stream().filter(x -> x<0).count();        
-    }
-    
 }

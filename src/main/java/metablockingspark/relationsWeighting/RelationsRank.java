@@ -24,6 +24,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
+import metablockingspark.utils.ComparableIntFloatPair;
+import metablockingspark.utils.ComparableIntFloatPairDescendingComparator;
 import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
@@ -207,15 +209,15 @@ public class RelationsRank implements Serializable {
             .combineByKey( //should be faster than groupByKey (keeps local top-Ns before shuffling, like a combiner in MapReduce)
             //createCombiner
             relation -> {
-                PriorityQueue<CustomRelation> initial = new PriorityQueue<>();
-                int relationRank = relationsRank.indexOf(relation._1());
-                initial.add(new CustomRelation(relation._2(), relationRank)); //relation's name, relation's rank
+                PriorityQueue<ComparableIntFloatPair> initial = new PriorityQueue<>(new ComparableIntFloatPairDescendingComparator());
+                int relationRank = relationsRank.indexOf(relation._1()); //relation's name
+                initial.add(new ComparableIntFloatPair(relation._2(), relationRank)); //neighbor's id, relation's rank
                 return initial; 
             }
             //mergeValue
-            , (PriorityQueue<CustomRelation> pq, Tuple2<String,Integer> relation) -> {
+            , (PriorityQueue<ComparableIntFloatPair> pq, Tuple2<String,Integer> relation) -> {
                 int relationRank = relationsRank.indexOf(relation._1());
-                CustomRelation c = new CustomRelation(relation._2(), relationRank);
+                ComparableIntFloatPair c = new ComparableIntFloatPair(relation._2(), relationRank);
                 pq.add(c);         
                 pq = removeSameNeighborWithLowerRank(pq, c); //from duplicate neighbor Ids, keep the one from the relation with the better ranking                                                       
                 if (pq.size() > N) {
@@ -224,9 +226,9 @@ public class RelationsRank implements Serializable {
                 return pq;
             }
             //mergeCombiners
-            , (PriorityQueue<CustomRelation> pq1, PriorityQueue<CustomRelation> pq2) -> {
+            , (PriorityQueue<ComparableIntFloatPair> pq1, PriorityQueue<ComparableIntFloatPair> pq2) -> {
                 while (!pq2.isEmpty()) {
-                    CustomRelation c = pq2.poll();                    
+                    ComparableIntFloatPair c = pq2.poll();                    
                     pq1.add(c);
                     pq1 = removeSameNeighborWithLowerRank(pq1, c);
                     if (pq1.size() > N) {
@@ -235,14 +237,7 @@ public class RelationsRank implements Serializable {
                 }
                 return pq1;
             }
-        ).mapValues(topN -> { //just reverse the order of candidates and transform values to IntArrayList (topN are kept already)                  
-            int i = topN.size();   
-            int[] candidates = new int[i];            
-            while (!topN.isEmpty()) {
-                candidates[--i] = topN.poll().getEntityId(); //get pq elements in reverse (i.e., ascending rank) order                
-            }            
-            return new IntArrayList(candidates);
-        });
+        ).mapValues(pq -> Utils.toIntArrayListReversed(pq));
        
     }
         
@@ -253,12 +248,12 @@ public class RelationsRank implements Serializable {
      * @param x
      * @return 
      */
-    private PriorityQueue<CustomRelation> removeSameNeighborWithLowerRank(PriorityQueue<CustomRelation> pq, CustomRelation x) {
+    private PriorityQueue<ComparableIntFloatPair> removeSameNeighborWithLowerRank(PriorityQueue<ComparableIntFloatPair> pq, ComparableIntFloatPair x) {
         int neighborIdToAdd = x.getEntityId();
         double newValue = x.getValue();
-        CustomRelation elementToDelete = null;
+        ComparableIntFloatPair elementToDelete = null;
         boolean sameRankTwice = false;
-        for (CustomRelation qElement : pq) { //traverses the queue in random order
+        for (ComparableIntFloatPair qElement : pq) { //traverses the queue in random order
             if (qElement.getEntityId() == neighborIdToAdd) {
                 if (qElement.getValue() > newValue) { //y is worse than x => delete y
                     elementToDelete = qElement;
@@ -281,43 +276,5 @@ public class RelationsRank implements Serializable {
         }
         return pq;
     }
-    
-    
-/**
- * Copied (and altered) from http://stackoverflow.com/a/16297127/2516301
- */
-private static class CustomRelation implements Comparable<CustomRelation>, Serializable {
-    // public final fields ok for this small example
-    public final int entityId;
-    public double value;
-
-    public CustomRelation(int entityId, double value) {
-        this.entityId = entityId;
-        this.value = value;
-    }
-
-    @Override
-    public int compareTo(CustomRelation other) {
-        // define (descending) sorting according to double fields
-        return -Double.compare(value, other.value); 
-    }
-    
-    public int getEntityId(){
-        return entityId;
-    }
-    
-    public void setValue(double value) {
-        this.value = value;
-    }
-    
-    public double getValue() {
-        return value;
-    }
-    
-    @Override
-    public String toString() {
-        return entityId+":"+value;
-    }
-}    
     
 }

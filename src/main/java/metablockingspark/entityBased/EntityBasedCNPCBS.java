@@ -21,7 +21,6 @@ import java.util.Map;
 import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
-import scala.Tuple2;
 
 /**
  * Entity based approach for CNP pruning (local top-k) using the CBS (common blocks) weighting scheme. 

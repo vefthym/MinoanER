@@ -28,11 +28,13 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.stream.Collectors;
 import org.apache.commons.lang3.StringEscapeUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.sql.SparkSession;
@@ -232,4 +234,20 @@ public class Utils {
         }
         return uri;
     }
+    /**
+     * Used in cases where a priority queue has been used to keep top K elements, and then its results are needed in descending order, 
+     * in the form of an IntArrayList. The size of the results is equal to the size of the input.
+     * @param pq
+     * @return 
+     */
+    public static IntArrayList toIntArrayListReversed(PriorityQueue<ComparableIntFloatPair> pq) {
+        int i = pq.size();   
+        int[] candidates = new int[i]; 
+        while (!pq.isEmpty()) {
+            ComparableIntFloatPair cand = pq.poll();
+            candidates[--i] = cand.getEntityId(); //get pq elements in reverse order
+        }
+        return new IntArrayList(candidates);
+    }
+    
 }

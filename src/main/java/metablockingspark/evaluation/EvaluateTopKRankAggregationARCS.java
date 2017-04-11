@@ -17,6 +17,9 @@
 package metablockingspark.evaluation;
 
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import java.util.ArrayList;
+import java.util.List;
 import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighborsARCS;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
@@ -27,12 +30,13 @@ import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.util.LongAccumulator;
+import scala.Tuple2;
 
 /**
  *
  * @author vefthym
  */
-public class EvaluateRankAggregationARCS {
+public class EvaluateTopKRankAggregationARCS {
     
     
     
@@ -76,7 +80,7 @@ public class EvaluateRankAggregationARCS {
             return;
         }
         
-        String appName = "ARCS rank aggregation on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1);
+        String appName = "ARCS topK rank aggregation on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1);
         SparkSession spark = Utils.setUpSpark(appName, 3, tmpPath);
         int PARALLELISM = spark.sparkContext().getConf().getInt("spark.default.parallelism", 152);        
         JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext()); 
@@ -140,7 +144,12 @@ public class EvaluateRankAggregationARCS {
         //rank aggregation        
         System.out.println("Starting rank aggregation...");
         LongAccumulator LISTS_WITH_COMMON_CANDIDATES = jsc.sc().longAccumulator();
-        JavaPairRDD<Integer,Integer> aggregationResults = new LocalRankAggregation().getTopCandidatePerEntity(topKValueCandidates, topKNeighborCandidates, LISTS_WITH_COMMON_CANDIDATES);
+        JavaPairRDD<Integer,IntArrayList> aggregationResults = 
+                new LocalRankAggregation().getTopKCandidatesPerEntity(
+                        topKValueCandidates, 
+                        topKNeighborCandidates, 
+                        LISTS_WITH_COMMON_CANDIDATES, 
+                        5); //K
         
         aggregationResults.cache();
         long numResults = aggregationResults.count();
@@ -155,22 +164,37 @@ public class EvaluateRankAggregationARCS {
         }
         
         //load the results        
-        JavaPairRDD<Integer,Integer> negativeResults = aggregationResults.filter(x -> x._1() < 0); //evaluate negative ids
-        JavaPairRDD<Integer,IntArrayList> positiveResults = aggregationResults.filter(x-> x._1() >= 0)
-                .mapToPair(x -> x.swap()) //evaluate positive ids
-                .groupByKey().mapValues(x-> { //many positive ids may have been matched to the same negative id
-                    IntArrayList result = new IntArrayList();
-                    for (int candidate : x) {
-                        result.add(candidate);
-                    }                    
-                    return result;
+        JavaPairRDD<Integer,IntArrayList> negativeIdResults = aggregationResults
+                .filter(x-> x._1() < 0);
+        
+        JavaPairRDD<Integer, IntArrayList> positiveIdResults = aggregationResults
+                .filter(x-> x._1() >= 0)                
+                .flatMapToPair(x -> {
+                    List<Tuple2<Integer,Integer>> candidates = new ArrayList<>();
+                    for (int candidate : x._2()) {
+                        candidates.add(new Tuple2<>(candidate, x._1()));
+                    }
+                    return candidates.iterator();
+                })
+                .aggregateByKey(new IntOpenHashSet(), 
+                        (x,y) -> {x.add(y); return x;}, 
+                        (x,y) -> {x.addAll(y); return x;})
+                .mapValues(x-> new IntArrayList(x));
+        
+        JavaPairRDD<Integer,IntArrayList> aggregationResultsFinal = 
+                negativeIdResults.fullOuterJoin(positiveIdResults)
+                .mapValues(x-> {
+                    IntArrayList list1 = x._1().orElse(new IntArrayList());
+                    IntArrayList list2 = x._2().orElse(new IntArrayList());
+                    IntOpenHashSet resultSet = new IntOpenHashSet(list1);
+                    resultSet.addAll(list2);
+                    return new IntArrayList(resultSet);
                 });
         
         //Start the evaluation        
         LongAccumulator TPs = jsc.sc().longAccumulator("TPs");
         LongAccumulator FPs = jsc.sc().longAccumulator("FPs");
-        LongAccumulator FNs = jsc.sc().longAccumulator("FNs");
-        EvaluateMatchingResults evaluation = new EvaluateMatchingResults();
+        LongAccumulator FNs = jsc.sc().longAccumulator("FNs");        
         EvaluateBlockingResults blockingEvaluation = new EvaluateBlockingResults();
         
         JavaPairRDD<Integer,Integer> gt = Utils.getGroundTruthIdsFromEntityIds(jsc.textFile(entityIds1, PARALLELISM), jsc.textFile(entityIds2, PARALLELISM), jsc.textFile(groundTruthPath), GT_SEPARATOR);
@@ -178,18 +202,9 @@ public class EvaluateRankAggregationARCS {
         
         System.out.println("Finished loading the ground truth with "+ gt.count()+" matches, now evaluating the results...");
         
-        evaluation.evaluateResults(negativeResults, gt, TPs, FPs, FNs);
-        System.out.println("\nNegative entity ids results:");
-        System.out.println("Found "+negativeResults.count()+" negative entities to be matched");
-        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
-        
-        TPs.reset();
-        FPs.reset();
-        FNs.reset();
-        
-        blockingEvaluation.evaluateBlockingResults(positiveResults, gt, TPs, FPs, FNs, false);
+        blockingEvaluation.evaluateBlockingResults(aggregationResultsFinal, gt, TPs, FPs, FNs, false);
         System.out.println("\nPositive entity ids results:");
-        System.out.println("Found "+positiveResults.count()+" positive entities to be matched");
+        System.out.println("Found "+aggregationResultsFinal.count()+" positive entities to be matched");
         EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
         
         spark.stop();

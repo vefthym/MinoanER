@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import metablockingspark.relationsWeighting.RelationsRank;
+import metablockingspark.utils.ComparableIntFloatPair;
 import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
@@ -200,22 +201,22 @@ public class EntityBasedCNPNeighbors implements Serializable {
         }).combineByKey( //should be faster than groupByKey (keeps local top-Ks before shuffling, like a combiner in MapReduce)
             //createCombiner
             x-> {
-                PriorityQueue<CustomCandidate> initial = new PriorityQueue<>();
-                initial.add(new CustomCandidate(x));
+                PriorityQueue<ComparableIntFloatPair> initial = new PriorityQueue<>();
+                initial.add(new ComparableIntFloatPair(x));
                 return initial; 
             }
             //mergeValue
-            , (PriorityQueue<CustomCandidate> pq, Tuple2<Integer,Float> tuple) -> {
-                pq.add(new CustomCandidate(tuple));
+            , (PriorityQueue<ComparableIntFloatPair> pq, Tuple2<Integer,Float> tuple) -> {
+                pq.add(new ComparableIntFloatPair(tuple));
                 if (pq.size() > K) {
                     pq.poll();
                 }
                 return pq;
             }
             //mergeCombiners
-            , (PriorityQueue<CustomCandidate> pq1, PriorityQueue<CustomCandidate> pq2) -> {
+            , (PriorityQueue<ComparableIntFloatPair> pq1, PriorityQueue<ComparableIntFloatPair> pq2) -> {
                 while (!pq2.isEmpty()) {
-                    CustomCandidate c = pq2.poll();
+                    ComparableIntFloatPair c = pq2.poll();
                     pq1.add(c);
                     if (pq1.size() > K) {
                         pq1.poll();
@@ -223,14 +224,7 @@ public class EntityBasedCNPNeighbors implements Serializable {
                 }
                 return pq1;
             }
-        ).mapValues(x -> {      //just reverse the order of candidates and transform values to IntArrayList (topK are kept already)      
-            int i = x.size();            
-            int[] candidates = new int[i];
-            while (!x.isEmpty()) {
-                candidates[--i] = x.poll().getEntityId(); //get pq elements in reverse (i.e., descending neighbor sim) order
-            }
-            return new IntArrayList(candidates);
-        });
+        ).mapValues(pq -> Utils.toIntArrayListReversed(pq));
     }
     
     
@@ -242,7 +236,7 @@ public class EntityBasedCNPNeighbors implements Serializable {
             int eId = x._1();
             IntArrayList eInNeighbors = inNeighbors_BV.value().get(eId);
             
-            List<Tuple2<Integer,CustomCandidate>> partialNeighborSims = new ArrayList<>(); //key: entityId, value: (candidateId, valueSim(outNeighbor(eId),outNeighbor(cId)) )
+            List<Tuple2<Integer,ComparableIntFloatPair>> partialNeighborSims = new ArrayList<>(); //key: entityId, value: (candidateId, valueSim(outNeighbor(eId),outNeighbor(cId)) )
             if (eInNeighbors == null) {
                 return partialNeighborSims.iterator(); //empty
             }
@@ -254,8 +248,8 @@ public class EntityBasedCNPNeighbors implements Serializable {
                 Float tmpNeighborSim = eIdValueCandidates.getValue();
                 for (Integer inNeighborOfCandidate : inNeighborsOfCandidate) { //for each in-neighbor of the candidate match of the current entity                    
                     for (Integer eInNeighbor : eInNeighbors) {  //for each in-neighbor of the current entity
-                        partialNeighborSims.add(new Tuple2<>(eInNeighbor, new CustomCandidate(inNeighborOfCandidate, tmpNeighborSim)));
-                        partialNeighborSims.add(new Tuple2<>(inNeighborOfCandidate, new CustomCandidate(eInNeighbor, tmpNeighborSim)));                        
+                        partialNeighborSims.add(new Tuple2<>(eInNeighbor, new ComparableIntFloatPair(inNeighborOfCandidate, tmpNeighborSim)));
+                        partialNeighborSims.add(new Tuple2<>(inNeighborOfCandidate, new ComparableIntFloatPair(eInNeighbor, tmpNeighborSim)));                        
                     }
                 }
             }
@@ -266,12 +260,12 @@ public class EntityBasedCNPNeighbors implements Serializable {
         .combineByKey(//should be faster than groupByKey (keeps local top-Ks before shuffling, like a combiner in MapReduce)
             //createCombiner
             x-> {
-                PriorityQueue<CustomCandidate> initial = new PriorityQueue<>();
+                PriorityQueue<ComparableIntFloatPair> initial = new PriorityQueue<>();
                 initial.add(x);
                 return initial; 
             }
             //mergeValue
-            , (PriorityQueue<CustomCandidate> pq, CustomCandidate x) -> {
+            , (PriorityQueue<ComparableIntFloatPair> pq, ComparableIntFloatPair x) -> {
                 pq.add(x); 
                 pq = removeSamePairWithLowerValue(pq, x);                
                 if (pq.size() > K) {
@@ -280,9 +274,9 @@ public class EntityBasedCNPNeighbors implements Serializable {
                 return pq;
             }
             //mergeCombiners
-            , (PriorityQueue<CustomCandidate> pq1, PriorityQueue<CustomCandidate> pq2) -> {
+            , (PriorityQueue<ComparableIntFloatPair> pq1, PriorityQueue<ComparableIntFloatPair> pq2) -> {
                 while (!pq2.isEmpty()) {
-                    CustomCandidate c = pq2.poll();
+                    ComparableIntFloatPair c = pq2.poll();
                     pq1.add(c);
                     pq1 = removeSamePairWithLowerValue(pq1, c);                    
                     if (pq1.size() > K) {
@@ -291,18 +285,7 @@ public class EntityBasedCNPNeighbors implements Serializable {
                 }
                 return pq1;
             }
-        ).mapValues(x -> {      //just reverse the order of candidates and transform values to IntArrayList (topK are kept already)      
-            int i = x.size();   
-            int[] candidates = new int[i]; 
-//            System.out.println("Top neighbor sims for this entity: ");
-            while (!x.isEmpty()) {
-                CustomCandidate cand = x.poll();
-                candidates[--i] = cand.getEntityId(); //get pq elements in reverse (i.e., descending neighbor sim) order
-//                System.out.print(cand.getValue()+",");
-            }
-//            System.out.println();
-            return new IntArrayList(candidates);
-        });
+        ).mapValues(pq -> Utils.toIntArrayListReversed(pq));
     }
 
     /**
@@ -312,12 +295,12 @@ public class EntityBasedCNPNeighbors implements Serializable {
      * @param x
      * @return 
      */
-    private PriorityQueue<CustomCandidate> removeSamePairWithLowerValue(PriorityQueue<CustomCandidate> pq, CustomCandidate x) {
+    private PriorityQueue<ComparableIntFloatPair> removeSamePairWithLowerValue(PriorityQueue<ComparableIntFloatPair> pq, ComparableIntFloatPair x) {
         int entityIdToAdd = x.getEntityId();
         float newValue = x.getValue();
-        CustomCandidate elementToDelete = null;
+        ComparableIntFloatPair elementToDelete = null;
         boolean sameValueTwice = false;
-        for (CustomCandidate qElement : pq) { //traverses the queue in random order
+        for (ComparableIntFloatPair qElement : pq) { //traverses the queue in random order
             if (qElement.getEntityId() == entityIdToAdd) {
                 if (qElement.getValue() < newValue) { //y is worse than x => delete y
                     elementToDelete = qElement;
@@ -340,48 +323,5 @@ public class EntityBasedCNPNeighbors implements Serializable {
         }
         return pq;
     }
-
-    
-    
-    
-  /**
-   * Copied (and altered) from http://stackoverflow.com/a/16297127/2516301
-   */
-  private static class CustomCandidate implements Comparable<CustomCandidate>, java.io.Serializable {
-    // public final fields ok for this small example
-    public final int entityId;
-    public final float value;
-
-    public CustomCandidate(Tuple2<Integer,Float> input) {
-        this.entityId = input._1();
-        this.value = input._2();
-    }
-    
-    public CustomCandidate(int entityId, float value) {
-        this.entityId = entityId;
-        this.value = value;
-    }
-
-    @Override
-    public int compareTo(CustomCandidate other) {
-        // define sorting according to float fields
-        return Float.compare(value, other.value); 
-    }
-    
-    public int getEntityId(){
-        return entityId;
-    }
-    
-    public float getValue() {
-        return value;
-    }
-    
-    @Override
-    public String toString() {
-        return entityId+":"+value;
-    }
-        
-  }        
-    
-    
+  
 }
