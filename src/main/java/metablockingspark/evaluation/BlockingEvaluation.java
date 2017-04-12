@@ -17,7 +17,6 @@ package metablockingspark.evaluation;
 
 import java.util.PriorityQueue;
 import metablockingspark.utils.ComparableIntFloatPairDUMMY;
-import metablockingspark.utils.ComparableIntFloatPairDUMMY.TYPE;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;

@@ -19,8 +19,11 @@ package metablockingspark.preprocessing;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.TreeMap;
 import java.util.logging.Logger;
+import metablockingspark.utils.ComparableIntFloatPair;
+import metablockingspark.utils.ComparableIntFloatPairDescendingComparator;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
@@ -107,18 +110,19 @@ public class BlockFilteringAdvanced {
         return entityBlocks.groupByKey()
             .mapValues(blocks -> {                               
                 //sort the tuples by value (inverseUtility)
-                Map<Integer,Integer> inverseBlocks = new TreeMap<>();
+                PriorityQueue<ComparableIntFloatPair> inverseBlocks = new PriorityQueue<>();
                 int numBlocks = 0;
                 for (Tuple2<Integer,Integer> block : blocks) {
-                    inverseBlocks.put(block._2(), block._1());
+                    inverseBlocks.add(new ComparableIntFloatPair(block._1(), block._2()));                    
                     numBlocks++;
                 }
-                final int MAX_BLOCKS = (int) Math.round(0.8 * numBlocks);
+                final int MAX_BLOCKS = (int) Math.round(0.8 * numBlocks); 
 
                 //keep MAX_BLOCKS blocks per entity
                 IntArrayList entityIndex = new IntArrayList();                
                 int indexedBlocks = 0;
-                for (int blockId : inverseBlocks.values()) {
+                while (!inverseBlocks.isEmpty()) {
+                    int blockId = inverseBlocks.poll().getEntityId();
                     entityIndex.add(blockId);
                     if (++indexedBlocks == MAX_BLOCKS) { break;} //comment-out this line to skip block filtering
                 }                
