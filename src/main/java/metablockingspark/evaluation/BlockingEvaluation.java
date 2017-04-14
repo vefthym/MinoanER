@@ -142,7 +142,7 @@ public abstract class BlockingEvaluation {
                     } else if (myCandidates.contains(correctResult)) {
                         TPs.add(1); //true match
                         FPs.add(myCandidates.size()-1); //the rest are false matches (ideal: only one candidate suggested)
-                        return joinedMatch._1();
+                        return joinedMatch._1(); //this entity contains the correct match in its list of candidates
                     } else {        //then the correct result is not included in my candidates => I missed this match and all my candidates are wrong
                         FPs.add(myCandidates.size()); //all my candidates were wrong 
                         FNs.add(1); //the correct match was missed

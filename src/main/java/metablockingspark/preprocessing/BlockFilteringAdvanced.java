@@ -18,12 +18,9 @@ package metablockingspark.preprocessing;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.PriorityQueue;
-import java.util.TreeMap;
 import java.util.logging.Logger;
 import metablockingspark.utils.ComparableIntFloatPair;
-import metablockingspark.utils.ComparableIntFloatPairDescendingComparator;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
@@ -76,22 +73,16 @@ public class BlockFilteringAdvanced {
     private JavaPairRDD<Integer, Tuple2<Integer, Integer>> getEntityBlocksAdvanced(JavaPairRDD<Integer, IntArrayList> parsedBlocks) {
         return parsedBlocks.flatMapToPair(block -> {
             int[] entities = block._2().elements();                
-            int numEntities = entities.length;
-            int D1counter = 0;
-            for (int entity : entities) {                                        
-                if (entity >= 0) {
-                    D1counter++;
-                } 
-            }
-            int D2counter = numEntities-D1counter;
-            long blockComparisons = D1counter * D2counter;
+            int D1counter = (int) block._2().stream().filter(entityId -> entityId >=0).count();            
+            int D2counter = (int) entities.length-D1counter;            
             
             List<Tuple2<Integer, Tuple2<Integer,Integer>>> mapResults = new ArrayList<>();
-            
-            int inverseUtility = Math.max(D1counter, D2counter);
-            if (blockComparisons == 0) {                
+                        
+            if (D1counter == 0 || D2counter == 0) {                
                 return mapResults.iterator(); //empty
             } 
+            
+            int inverseUtility = Math.max(D1counter, D2counter);
             Tuple2<Integer,Integer> blockUtility = new Tuple2<>(block._1(), inverseUtility);  
                         
             for (Integer entityId : entities) {

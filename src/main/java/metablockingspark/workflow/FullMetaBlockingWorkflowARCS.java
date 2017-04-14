@@ -16,6 +16,7 @@
 
 package metablockingspark.workflow;
 
+import it.unimi.dsi.fastutil.ints.Int2FloatLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -134,7 +135,7 @@ public class FullMetaBlockingWorkflowARCS {
         
         System.out.println("Getting the top K value candidates...");
         EntityBasedCNPNeighborsARCS cnp = new EntityBasedCNPNeighborsARCS();        
-        JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, K);
+        JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, K);
         
         blocksFromEI.unpersist();        
         

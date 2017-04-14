@@ -15,6 +15,7 @@
  */
 package metablockingspark.rankAggregation;
 
+import it.unimi.dsi.fastutil.ints.Int2FloatLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
 import java.io.Serializable;
 import java.util.PriorityQueue;
@@ -42,7 +43,7 @@ public class LocalRankAggregation implements Serializable {
      * @param LISTS_WITH_COMMON_CANDIDATES
      * @return the top-1 aggregate candidate match per entity
      */
-    public JavaPairRDD<Integer,Integer> getTopCandidatePerEntity(JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates, LongAccumulator LISTS_WITH_COMMON_CANDIDATES) {
+    public JavaPairRDD<Integer,Integer> getTopCandidatePerEntity(JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates, LongAccumulator LISTS_WITH_COMMON_CANDIDATES) {
         return topKValueCandidates                
                 .mapValues(x -> new IntArrayList(Utils.sortByValue(x, true).keySet())) //sort the int2floatopenhashmap and get the keys (entityIds) sorted by values (value similarity) (descending)                
                 .fullOuterJoin(topKNeighborCandidates)
@@ -58,7 +59,7 @@ public class LocalRankAggregation implements Serializable {
      * @param K how many candidates to keep per entity
      * @return the top-K aggregate candidate match per entity
      */
-    public JavaPairRDD<Integer,IntArrayList> getTopKCandidatesPerEntity(JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates, LongAccumulator LISTS_WITH_COMMON_CANDIDATES, int K, 
+    public JavaPairRDD<Integer,IntArrayList> getTopKCandidatesPerEntity(JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates, LongAccumulator LISTS_WITH_COMMON_CANDIDATES, int K, 
             LongAccumulator RESULTS_FROM_VALUES, LongAccumulator RESULTS_FROM_NEIGHBORS, LongAccumulator RESULTS_FROM_SUM, 
             LongAccumulator RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS, LongAccumulator RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES) {
         return topKValueCandidates                
@@ -79,7 +80,7 @@ public class LocalRankAggregation implements Serializable {
      * @param K how many candidates to keep per entity
      * @return the top-K aggregate candidate match per entity
      */
-    public JavaPairRDD<Integer,PriorityQueue<ComparableIntFloatPairDUMMY>> getTopKCandidatesPerEntityDEBUGGING(JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates, LongAccumulator LISTS_WITH_COMMON_CANDIDATES, int K, 
+    public JavaPairRDD<Integer,PriorityQueue<ComparableIntFloatPairDUMMY>> getTopKCandidatesPerEntityDEBUGGING(JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates, LongAccumulator LISTS_WITH_COMMON_CANDIDATES, int K, 
             LongAccumulator RESULTS_FROM_VALUES, LongAccumulator RESULTS_FROM_NEIGHBORS, LongAccumulator RESULTS_FROM_SUM, 
             LongAccumulator RESULTS_FROM_VALUES_WITHOUT_NEIGHBORS, LongAccumulator RESULTS_FROM_NEIGHBORS_WITHOUT_VALUES) {
         return topKValueCandidates                

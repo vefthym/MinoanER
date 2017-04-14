@@ -15,6 +15,7 @@
  */
 package metablockingspark.evaluation;
 
+import it.unimi.dsi.fastutil.ints.Int2FloatLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import java.io.IOException;
@@ -134,7 +135,7 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
         
         System.out.println("Getting the top K value candidates...");
         EntityBasedCNPNeighborsARCS cnp = new EntityBasedCNPNeighborsARCS();        
-        JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, K);
+        JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, K);
         
         blocksFromEI.unpersist();        
         
@@ -197,7 +198,11 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
         
         System.out.println("Finished loading the ground truth with "+ numKnownMatches+" matches, now evaluating the results...");  
         
-        JavaRDD<Integer> matchesFoundFromNeighbors = evaluation.getTruePositivesEntityIds(neighborResults, gt, TPs, FPs, FNs);        
+        System.out.println("Evaluate neighbors...");
+        JavaRDD<Integer> matchesFoundFromNeighbors = evaluation.getTruePositivesEntityIds(neighborResults, gt, TPs, FPs, FNs); 
+        matchesFoundFromNeighbors.cache();
+        long numMatchesFromNeighbors = matchesFoundFromNeighbors.count();
+        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
         
         
         //evaluate value results
@@ -231,14 +236,17 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
                     return new IntArrayList(resultSet);
                 });
         
-        
+        TPs.reset();
+        FPs.reset();
+        FNs.reset();        
+        System.out.println("\nEvaluate values...");
         JavaRDD<Integer> matchesFoundFromValues = evaluation.getTruePositivesEntityIds(valueResults, gt, TPs, FPs, FNs);    
-        
         matchesFoundFromValues.cache();
-        matchesFoundFromNeighbors.cache();
+        long numMatchesFromValues = matchesFoundFromValues.count();
+        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
         
-        System.out.println("Matches found from values: "+matchesFoundFromValues.count());
-        System.out.println("Matches found from neighbors: "+matchesFoundFromNeighbors.count());
+        System.out.println("Matches found from values: "+numMatchesFromValues);
+        System.out.println("Matches found from neighbors: "+numMatchesFromNeighbors);
         
         
         long union = matchesFoundFromNeighbors.union(matchesFoundFromValues).distinct().count();

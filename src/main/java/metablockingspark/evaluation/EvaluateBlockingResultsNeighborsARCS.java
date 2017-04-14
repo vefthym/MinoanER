@@ -15,7 +15,7 @@
  */
 package metablockingspark.evaluation;
 
-import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2FloatLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -23,17 +23,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighbors;
 import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighborsARCS;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
-import metablockingspark.preprocessing.EntityWeightsWJS;
 import metablockingspark.utils.Utils;
 import metablockingspark.workflow.FullMetaBlockingWorkflow;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.broadcast.Broadcast;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.util.LongAccumulator;
 import scala.Tuple2;
@@ -136,7 +133,7 @@ public class EvaluateBlockingResultsNeighborsARCS extends BlockingEvaluation {
         
         System.out.println("Getting the top K value candidates...");
         EntityBasedCNPNeighborsARCS cnp = new EntityBasedCNPNeighborsARCS();        
-        JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, K);
+        JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, K);
         
         blocksFromEI.unpersist();        
         

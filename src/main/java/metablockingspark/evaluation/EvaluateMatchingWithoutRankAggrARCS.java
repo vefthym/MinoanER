@@ -15,6 +15,7 @@
  */
 package metablockingspark.evaluation;
 
+import it.unimi.dsi.fastutil.ints.Int2FloatLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import java.io.IOException;
@@ -134,12 +135,12 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
         
         System.out.println("Getting the top K value candidates...");
         EntityBasedCNPNeighborsARCS cnp = new EntityBasedCNPNeighborsARCS();        
-        JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, K);
+        JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, K);
         
         blocksFromEI.unpersist();        
         
         System.out.println("Getting the top K neighbor candidates...");
-        JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates = cnp.run(
+        JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKNeighborCandidates = cnp.run2(
                 topKValueCandidates, 
                 jsc.textFile(inputTriples1, PARALLELISM), 
                 jsc.textFile(inputTriples2, PARALLELISM), 
@@ -149,10 +150,28 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
                 MIN_SUPPORT_THRESHOLD, K, N, 
                 jsc);
         
+//        List<Tuple2<Integer, Int2FloatLinkedOpenHashMap>> valueSims_SAMPLE  = topKValueCandidates.takeSample(true, 10);
+//        for (Tuple2<Integer, Int2FloatLinkedOpenHashMap> sample : valueSims_SAMPLE) {
+//            System.out.println("Top value sims for entity "+sample._1());
+//            System.out.println(sample._2());
+//        }
+//        
+//        List<Tuple2<Integer, Int2FloatLinkedOpenHashMap>> neihgborSims_SAMPLE  = topKNeighborCandidates.takeSample(true, 10);
+//        for (Tuple2<Integer, Int2FloatLinkedOpenHashMap> sample : neihgborSims_SAMPLE) {
+//            System.out.println("Top neighbor sims for entity "+sample._1());
+//            System.out.println(sample._2());
+//        }
+        
         //reciprocal matching
         System.out.println("Starting reciprocal matching...");
         //JavaPairRDD<Integer,IntArrayList> candidateMatches = new ReciprocalMatchingFromMetaBlocking().getReciprocalCandidateMatches(topKValueCandidates, topKNeighborCandidates);
-        JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatches(topKValueCandidates, topKNeighborCandidates);
+        //JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatches(topKValueCandidates, topKNeighborCandidates);        
+        LongAccumulator ties = jsc.sc().longAccumulator();
+        LongAccumulator tiesAbove1 = jsc.sc().longAccumulator();
+        //JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatchesTEST(topKValueCandidates, topKNeighborCandidates, ties, tiesAbove1);
+        //JavaPairRDD<Integer,IntArrayList> candidateMatches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatchesTEST3(topKValueCandidates.filter(x-> x._1() <0), topKNeighborCandidates.filter(x->x._1()<0), ties, tiesAbove1);
+        JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking()
+                .getReciprocalMatchesTEST4(topKValueCandidates/*.filter(x-> x._1() <0)*/, topKNeighborCandidates/*.filter(x->x._1()<0)*/, ties, tiesAbove1);
         
         //Start the evaluation        
         LongAccumulator TPs = jsc.sc().longAccumulator("TPs");
@@ -168,9 +187,37 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
         gt.cache();
         gt.saveAsTextFile(groundTruthOutputPath);
         
+        JavaPairRDD<Integer,Integer> gt_sample = gt.sample(true, 0.003);
+//      
+        List<Tuple2<Integer, Tuple2<Tuple2<Tuple2<Int2FloatLinkedOpenHashMap, Integer>,Int2FloatLinkedOpenHashMap>, Integer>>> samples = topKValueCandidates.join(gt_sample).join(topKNeighborCandidates).join(matches).collect();
+        for (Tuple2<Integer, Tuple2<Tuple2<Tuple2<Int2FloatLinkedOpenHashMap, Integer>,Int2FloatLinkedOpenHashMap>, Integer>> sample : samples) {
+            System.out.println("\nTop value sims for entity "+sample._1());
+            System.out.println(sample._2()._1()._1()._1());
+            System.out.println("Top neighbor sims for entity "+sample._1());
+            System.out.println(sample._2()._1()._2());
+            System.out.println("The correct match is "+sample._2()._1()._1()._2());    
+            System.out.println("The returned result is "+sample._2()._2());
+        }        
+        
+//        System.out.println("Now printing candidates from reversed ground truth: ");
+//        
+//        JavaPairRDD<Integer,Integer> gt_sampleReverse = gt_sample.mapToPair(x -> x.swap());
+//        List<Tuple2<Integer, Tuple2<Tuple2<Int2FloatLinkedOpenHashMap, Integer>, Int2FloatLinkedOpenHashMap>>> reverseSamples = topKValueCandidates.join(gt_sampleReverse).join(topKNeighborCandidates).collect();
+//        for (Tuple2<Integer, Tuple2<Tuple2<Int2FloatLinkedOpenHashMap, Integer>, Int2FloatLinkedOpenHashMap>> sample : reverseSamples) {
+//            System.out.println("\nTop value sims for entity "+sample._1());
+//            System.out.println(sample._2()._1()._1());
+//            System.out.println("Top neighbor sims for entity "+sample._1());
+//            System.out.println(sample._2()._2());
+//            System.out.println("The correct match is "+sample._2()._1()._2());            
+//        }
+        
+        
         System.out.println("Finished loading the ground truth with "+ gt.count()+" matches, now evaluating the results...");  
         new EvaluateMatchingResults().evaluateResults(matches, gt, TPs, FPs, FNs);        
         //new EvaluateMatchingWithoutRankAggrARCS().evaluateBlockingResults(candidateMatches, gt, TPs, FPs, FNs, false);
+        
+        System.out.println("Ties: "+ties.value());
+        System.out.println("Ties in scores > 1: "+tiesAbove1.value());
         System.out.println("Evaluation finished successfully.");
         EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
         

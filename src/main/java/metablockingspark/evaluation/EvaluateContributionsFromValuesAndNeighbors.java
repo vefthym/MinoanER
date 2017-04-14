@@ -15,6 +15,7 @@
  */
 package metablockingspark.evaluation;
 
+import it.unimi.dsi.fastutil.ints.Int2FloatLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import java.io.IOException;
@@ -24,6 +25,7 @@ import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighbors;
+import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighborsUnnormalized;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
 import metablockingspark.preprocessing.EntityWeightsWJS;
@@ -146,8 +148,9 @@ public class EvaluateContributionsFromValuesAndNeighbors extends BlockingEvaluat
         final int N = 3; //for top-N neighbors
         
         System.out.println("Getting the top K value candidates...");
-        EntityBasedCNPNeighbors cnp = new EntityBasedCNPNeighbors();        
-        JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
+        EntityBasedCNPNeighborsUnnormalized cnp = new EntityBasedCNPNeighborsUnnormalized();                
+        //JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, totalWeights_BV, K, numNegativeEntities, numPositiveEntities);
+        JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, K, numNegativeEntities, numPositiveEntities);
         
         blocksFromEI.unpersist();        
         

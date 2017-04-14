@@ -31,33 +31,22 @@ import scala.Tuple2;
  */
 public class BlocksFromEntityIndex {
     
-    public JavaPairRDD<Integer, IntArrayList> run(JavaPairRDD<Integer,IntArrayList> entityIndex, LongAccumulator cleanBlocksAccum, LongAccumulator numComparisons) {
-        System.out.println("Getting the blocks from the entity index...");
-        JavaPairRDD<Integer,Integer> flat = entityIndex.flatMapToPair(x -> 
-            {                   
-                List<Tuple2<Integer,Integer>> mapResults = new ArrayList<>();
-                Integer entityId = x._1();
-                for (Integer blockId : x._2()) {
-                    mapResults.add(new Tuple2<>(blockId, entityId));
-                }
-                return mapResults.iterator();
-            });
-        
-        System.out.println("Flattening of entity Index finished. Starting group by block..."); //debugging message
-        //JavaPairRDD<Integer, Iterable<Integer>> blockGroups = flat.groupByKey();//group by block id       
-        JavaPairRDD<Integer, IntArrayList> blockGroups =  //group by block id       
-                flat.aggregateByKey(
-                        new IntArrayList(),                         //zero funct (a new empty list of integers)
-                        (x,y)-> {x.add(y.intValue()); return x;},   //aggr fucnt (for each new integer y, add it to existing list x)
-                        (x,y)-> {x.addAll(y); return x;}            //comb funct (for each existing list y, add it to existing list x)
-                );          
-        
-        System.out.println("Group by block finished. Starting filtering singleton blocks and blocks with entities from one collection"); //debugging message
-        return blockGroups.filter(x -> { //keep only blocks with > 2 entities and with entities from both datasets (i.e., at least 1 positive and 1 negative entityId)
+    public JavaPairRDD<Integer, IntArrayList> run(JavaPairRDD<Integer,IntArrayList> entityIndex, LongAccumulator cleanBlocksAccum, LongAccumulator numComparisons) {        
+        return entityIndex.flatMapToPair(x -> {                   
+            List<Tuple2<Integer,Integer>> mapResults = new ArrayList<>();
+            Integer entityId = x._1();
+            x._2().stream().forEach(blockId -> mapResults.add(new Tuple2<>(blockId, entityId)));            
+            return mapResults.iterator();
+        })
+        .aggregateByKey(
+            new IntArrayList(),                         //zero funct (a new empty list of integers)
+            (x,y)-> {x.add(y.intValue()); return x;},   //aggr fucnt (for each new integer y, add it to existing list x)
+            (x,y)-> {x.addAll(y); return x;}            //comb funct (for each existing list y, add it to existing list x)
+        )
+        .filter(x -> { //keep only blocks with > 2 entities and with entities from both datasets (i.e., at least 1 positive and 1 negative entityId)
                 IntArrayList entities = x._2();
                 long negatives = 0;
-                boolean containsPositive = false;
-                boolean containsNegative = false;
+                boolean containsPositive = false, containsNegative = false;                
                 long numEntities = entities.size();
                 if (numEntities < 2) {
                     return false;
