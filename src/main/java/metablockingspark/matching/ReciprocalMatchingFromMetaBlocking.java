@@ -276,7 +276,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                 .mapValues(x -> {
                     Int2FloatLinkedOpenHashMap halfValues = new Int2FloatLinkedOpenHashMap();
                     for (Map.Entry<Integer, Float> entry : x.entrySet()) {
-                        halfValues.put(entry.getKey().intValue(), entry.getValue()*0.1f);
+                        halfValues.put(entry.getKey().intValue(), entry.getValue()*0.05f);
                     }
                     return halfValues;
                 })

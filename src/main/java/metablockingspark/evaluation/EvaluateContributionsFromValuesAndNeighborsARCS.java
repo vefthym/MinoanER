@@ -90,7 +90,7 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
             return;
         }
         
-        String appName = "WJS contribution evaluation on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1);
+        String appName = "ARCS contribution evaluation on "+inputPath.substring(inputPath.lastIndexOf("/", inputPath.length()-2)+1);
         SparkSession spark = Utils.setUpSpark(appName, 3, tmpPath);
         int PARALLELISM = spark.sparkContext().getConf().getInt("spark.default.parallelism", 152);        
         JavaSparkContext jsc = JavaSparkContext.fromSparkContext(spark.sparkContext());        
@@ -118,7 +118,7 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
         System.out.println(blocksFromEI.count()+" have been left after block filtering");
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
-        final int K = Math.max(1, ((Double)Math.floor(BCin)).intValue()); //K = |_BCin -1_|
+        final int K = (args.length == 7) ? Integer.parseInt(args[6]) : Math.max(1, ((Double)Math.floor(BCin)).intValue()); //K = |_BCin -1_|        
         System.out.println(BLOCK_ASSIGNMENTS_ACCUM.value()+" block assignments");
         System.out.println(CLEAN_BLOCK_ACCUM.value()+" clean blocks");
         System.out.println(NUM_COMPARISONS_ACCUM.value()+" comparisons");
@@ -131,7 +131,7 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
         System.out.println("\n\nStarting CNP...");
         String SEPARATOR = (inputTriples1.endsWith(".tsv"))? "\t" : " ";        
         final float MIN_SUPPORT_THRESHOLD = 0.01f;
-        final int N = 3; //for top-N neighbors
+        final int N = 5; //for top-N neighbors
         
         System.out.println("Getting the top K value candidates...");
         EntityBasedCNPNeighborsARCS cnp = new EntityBasedCNPNeighborsARCS();        
