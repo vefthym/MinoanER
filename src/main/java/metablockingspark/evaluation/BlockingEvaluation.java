@@ -151,5 +151,39 @@ public abstract class BlockingEvaluation {
                 }).filter(x -> x != null);
     }
     
+    /**
+     * Compute precision, recall, f-measure of the input results, given the ground truth and return the negative ids of found matches. 
+     * The input RDDs should be in the same format (negative entity Id, positive entity Id).
+     * @param blockingResults the blocking results in the form (-entityId, +entityId)
+     * @param groundTruth the ground truth in the form (-entityId, +entityId)
+     * @param TPs true positives to update (true matches)
+     * @param FPs false positives to update (false matches)
+     * @param FNs false negatives to update (missed matches)
+     * @return the negative ids from found matches.
+     */
+    public JavaRDD<Integer> getTruePositivesEntityIdsNEW(JavaPairRDD<Integer,IntArrayList> blockingResults, JavaPairRDD<Integer,Integer> groundTruth, LongAccumulator TPs, LongAccumulator FPs, LongAccumulator FNs) {
+        return blockingResults
+                .rightOuterJoin(groundTruth) //keep only ground truth matches, ignore other FPs
+                .map(joinedMatch -> {
+                    IntArrayList myCandidates = joinedMatch._2()._1().orElse(null);
+                    Integer correctResult = joinedMatch._2()._2();
+                    if (myCandidates == null) { //this means that the correct result is not null (otherwise, nothing to join here)
+                        FNs.add(1); //missed match
+                        return null;
+                    /*} else if (correctResult == null) {
+                        FPs.add(myCandidates.size()); //each candidate is a false match (no candidate should exist)
+                        return null;                    */
+                    } else if (myCandidates.contains(correctResult)) {
+                        TPs.add(1); //true match
+                        FPs.add(myCandidates.size()-1); //the rest are false matches (ideal: only one candidate suggested)
+                        return joinedMatch._1(); //this entity contains the correct match in its list of candidates
+                    } else {        //then the correct result is not included in my candidates => I missed this match and all my candidates are wrong
+                        FPs.add(myCandidates.size()); //all my candidates were wrong 
+                        FNs.add(1); //the correct match was missed
+                        return null;
+                    }                    
+                }).filter(x -> x != null);
+    }
+    
     
 }

@@ -213,7 +213,7 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
         
         
         System.out.println("Finished loading the ground truth with "+ gt.count()+" matches, now evaluating the results...");  
-        new EvaluateMatchingResults().evaluateResults(matches, gt, TPs, FPs, FNs);        
+        new EvaluateMatchingResults().evaluateResultsNEW(matches, gt, TPs, FPs, FNs);        
         //new EvaluateMatchingWithoutRankAggrARCS().evaluateBlockingResults(candidateMatches, gt, TPs, FPs, FNs, false);
         
         System.out.println("Ties: "+ties.value());

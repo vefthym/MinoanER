@@ -152,7 +152,7 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
         
         
         JavaPairRDD<Integer,IntArrayList> negativeIdResults = topKNeighborCandidates
-                .filter(x-> x._1() < 0);
+                .filter(x-> x._1() < 0);        
         
         JavaPairRDD<Integer, IntArrayList> positiveIdResults = topKNeighborCandidates
                 .filter(x-> x._1() >= 0)                
@@ -167,7 +167,7 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
                         (x,y) -> {x.add(y); return x;}, 
                         (x,y) -> {x.addAll(y); return x;})
                 .mapValues(x-> new IntArrayList(x));
-        
+                
         JavaPairRDD<Integer,IntArrayList> neighborResults = 
                 negativeIdResults.fullOuterJoin(positiveIdResults)
                 .mapValues(x-> {
@@ -177,7 +177,7 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
                     resultSet.addAll(list2);
                     return new IntArrayList(resultSet);
                 });
-        
+                
         
         //Start the evaluation        
         LongAccumulator TPs = jsc.sc().longAccumulator("TPs");
@@ -195,13 +195,13 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
         gt.saveAsTextFile(groundTruthOutputPath);
         
         long numKnownMatches = gt.count();
-        
+                        
         System.out.println("Finished loading the ground truth with "+ numKnownMatches+" matches, now evaluating the results...");  
         
         System.out.println("Evaluate neighbors...");
-        JavaRDD<Integer> matchesFoundFromNeighbors = evaluation.getTruePositivesEntityIds(neighborResults, gt, TPs, FPs, FNs); 
+        JavaRDD<Integer> matchesFoundFromNeighbors = evaluation.getTruePositivesEntityIdsNEW(neighborResults, gt, TPs, FPs, FNs); 
         matchesFoundFromNeighbors.cache();
-        long numMatchesFromNeighbors = matchesFoundFromNeighbors.count();
+        long numMatchesFromNeighbors = matchesFoundFromNeighbors.distinct().count();
         EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
         
         
@@ -240,9 +240,9 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
         FPs.reset();
         FNs.reset();        
         System.out.println("\nEvaluate values...");
-        JavaRDD<Integer> matchesFoundFromValues = evaluation.getTruePositivesEntityIds(valueResults, gt, TPs, FPs, FNs);    
+        JavaRDD<Integer> matchesFoundFromValues = evaluation.getTruePositivesEntityIdsNEW(valueResults, gt, TPs, FPs, FNs);    
         matchesFoundFromValues.cache();
-        long numMatchesFromValues = matchesFoundFromValues.count();
+        long numMatchesFromValues = matchesFoundFromValues.distinct().count();
         EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
         
         System.out.println("Matches found from values: "+numMatchesFromValues);

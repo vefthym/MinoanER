@@ -62,6 +62,36 @@ public class EvaluateMatchingResults {
                 });
     }
     
+    /**
+     * Compute precision, recall, f-measure of the input results, given the ground truth. 
+     * The input RDDs should be in the same format (negative entity Id, positive entity Id). 
+     * This is a void method, as it only changes the accumulator values. 
+     * @param results the matching results in the form (-entityId, +entityId)
+     * @param groundTruth the ground truth in the form (-entityId, +entityId)
+     * @param TPs
+     * @param FPs
+     * @param FNs
+     */
+    public void evaluateResultsNEW(JavaPairRDD<Integer,Integer> results, JavaPairRDD<Integer,Integer> groundTruth, LongAccumulator TPs, LongAccumulator FPs, LongAccumulator FNs) {
+        results
+                .rightOuterJoin(groundTruth)
+                .foreach(joinedMatch -> {
+                    Integer myResult = joinedMatch._2()._1().orElse(null);
+                    Integer correctResult = joinedMatch._2()._2();
+                    if (myResult == null) {
+                        FNs.add(1); //missed match
+                    /*} else if (correctResult == null) {
+                        FPs.add(1); //wrong match
+                        */
+                    } else if (myResult.equals(correctResult)) {
+                        TPs.add(1); //true match
+                    } else {        //then I gave a different result than the correct match
+                        FPs.add(1); //my result was wrong 
+                        FNs.add(1); //the correct match was missed
+                    }                    
+                });
+    }
+    
     
     public static void printResults(long tps, long fps, long fns) {
         double precision = (double) tps / (tps + fps);

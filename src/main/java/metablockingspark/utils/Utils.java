@@ -16,6 +16,7 @@
 
 package metablockingspark.utils;
 
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
@@ -163,10 +164,17 @@ public class Utils {
                     line = line.toLowerCase();
                     String [] parts = line.split(GT_SEPARATOR);                    
                     parts[1] = encodeURIinUTF8(parts[1]);
-                    return new Tuple2<>(-entityIds2.getOrDefault(parts[1], -1), //negative id first
+                    return new Tuple2<>(-entityIds2.getOrDefault(parts[1], -1), //negative id first (keep default -1, since -(-1) == 1)
                                         entityIds1.getOrDefault(parts[0], -1)); //positive id second
                 })
-                .filter(x-> x._1() != 1 && x._2() != -1);
+                .filter(x-> x._1() != 1 && x._2() != -1) //throw away pairs whose elements (one or both) do not appear in the dataset
+                //remove pairs violating the clean-clean constraint
+                .aggregateByKey(new IntOpenHashSet(), 
+                        (x,y) -> {x.add(y); return x;}, 
+                        (x,y) -> {x.addAll(y); return x;})
+                .filter(x -> x._2().size() == 1) //not more than one match allowed per (negative) entity
+                .mapValues(x -> x.iterator().next());
+                
     }
     
     /**
