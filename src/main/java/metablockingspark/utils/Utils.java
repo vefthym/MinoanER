@@ -183,7 +183,7 @@ public class Utils {
      * @param GT_SEPARATOR
      * @return 
      */
-    public static JavaPairRDD<Integer,Integer> readGroundTruthIdsFromEntityIds (JavaRDD<String> gt, String GT_SEPARATOR) {
+    public static JavaPairRDD<Integer,Integer> readGroundTruthIds (JavaRDD<String> gt, String GT_SEPARATOR) {
         return gt.mapToPair(line -> {                    
                     String [] parts = line.split(GT_SEPARATOR);                    
                     int entity1Id = Integer.parseInt(parts[0]);

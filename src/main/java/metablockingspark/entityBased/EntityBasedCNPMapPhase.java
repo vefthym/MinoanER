@@ -35,9 +35,9 @@ public class EntityBasedCNPMapPhase {
     public static JavaPairRDD<Integer,IntArrayList> getMapOutput(JavaPairRDD<Integer, IntArrayList> blocksFromEI) {        
         return blocksFromEI.flatMapToPair(block -> {            
             IntArrayList positives = new IntArrayList();
-            IntArrayList negatives = new IntArrayList();
+            IntArrayList negatives = new IntArrayList();            
             	
-            for (int entityId : block._2()) { 
+            for (int entityId : block._2()) { //faster than streaming block._2() twice
                 if (entityId < 0) {
                     negatives.add(entityId);
                 } else {
@@ -48,8 +48,7 @@ public class EntityBasedCNPMapPhase {
             List<Tuple2<Integer,IntArrayList>> mapResults = new ArrayList<>();
             
             if (positives.isEmpty() || negatives.isEmpty()) {                
-                return null;
-                //return mapResults.iterator(); //empty result on purpose (to avoid returning null and then filtering out null results)
+                return mapResults.iterator(); //empty result on purpose (to avoid returning null and then filtering out null results)
             }        
             
             //emit all the negative entities array for each positive entity
@@ -63,8 +62,8 @@ public class EntityBasedCNPMapPhase {
             }
             
             return mapResults.iterator();
-        })
-        .filter(x-> x != null); //comment out when return null is replaced by return new ArrayList<>().iterator()
+        });
+        //.filter(x-> x != null); //comment out when return null is replaced by return new ArrayList<>().iterator()
     }
     
     
@@ -118,6 +117,6 @@ public class EntityBasedCNPMapPhase {
             
             return mapResults.iterator();
         })
-        .filter(x-> x._2().size() > 1); //why does the second condition not work?
+        .filter(x-> x._2().size() > 1); 
     }
 }

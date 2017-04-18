@@ -259,10 +259,11 @@ public class ReciprocalMatchingFromMetaBlocking {
     public JavaPairRDD<Integer, Integer> getReciprocalMatchesTEST4(JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKNeighborCandidates, LongAccumulator ties, LongAccumulator tiesAbove1) {
         
         JavaPairRDD<Integer,Integer> matchesFromTop1Value = topKValueCandidates
-                .filter(x -> x._1() < 0 && x._2().get(x._2().firstIntKey()) >= 1f)
-                .mapValues(x -> x.firstIntKey()); //todo: check for ties at first place with scores > 1
+                .filter(x -> x._1() < 0 && x._2().get(x._2().firstIntKey()) >= 1f) //keep pairs with negative key id and value_sim > 1
+                .mapValues(x -> x.firstIntKey()); //return those pairs as matches //todo: check for ties at first place with scores > 1
         
         /*
+        //do the same for positive key ids
         matchesFromTop1Value = topKValueCandidates
                 .filter(x -> x._1() >= 0 && x._2().get(x._2().firstIntKey()) >= 1f)
                 .mapToPair(match -> new Tuple2<>(match._2().firstIntKey(), match._1()))
@@ -270,50 +271,38 @@ public class ReciprocalMatchingFromMetaBlocking {
                 .union(matchesFromTop1Value);
         */
         
-        System.out.println("Found "+matchesFromTop1Value.count()+" match suggestions from top-1 value sim > 1");
+        System.out.println("Found "+matchesFromTop1Value.count()+" match suggestions from top-1 value sim > 1");        
         
         return topKNeighborCandidates
                 .mapValues(x -> {
-                    Int2FloatLinkedOpenHashMap halfValues = new Int2FloatLinkedOpenHashMap();
+                    Int2FloatLinkedOpenHashMap scaledDownValues = new Int2FloatLinkedOpenHashMap();
+                    float scaleFactor  = 0.05f;
                     for (Map.Entry<Integer, Float> entry : x.entrySet()) {
-                        halfValues.put(entry.getKey().intValue(), entry.getValue()*0.05f);
+                        scaledDownValues.put(entry.getKey().intValue(), entry.getValue()*scaleFactor);
                     }
-                    return halfValues;
+                    return scaledDownValues;
                 })
                 .union(topKValueCandidates) //bag semantics (a candidate match may appear once or twice per entity)                                
                 .flatMapToPair(pairs -> {
                     int keyId = pairs._1();
-                    List<Tuple2<Tuple2<Integer,Integer>, Float>> outputPairs = new ArrayList<>(); //byte to save space (not expected to have values > 4)
+                    List<Tuple2<Tuple2<Integer,Integer>, Float>> outputPairs = new ArrayList<>(); //key:(-eId,+eID) value: sim_score (summed)
                     if (keyId < 0) {
                         for (Map.Entry<Integer,Float> candidate : pairs._2().entrySet()) { //a candidate may be checked twice (on purpose)
                             outputPairs.add(new Tuple2<>(new Tuple2<>(keyId, candidate.getKey()), candidate.getValue()));
                         }
                     } else {
+                        float scaleFactor = 0.5f;
                         for (Map.Entry<Integer,Float> candidate : pairs._2().entrySet()) { //a candidate may be checked twice (on purpose)
-                            outputPairs.add(new Tuple2<>(new Tuple2<>(candidate.getKey(), keyId), candidate.getValue()*0.5f)); //less important than the other dataset
+                            outputPairs.add(new Tuple2<>(new Tuple2<>(candidate.getKey(), keyId), candidate.getValue()*scaleFactor)); //less important than the other dataset
                         }
                     }                    
                     return outputPairs.iterator();
                 })                     
-                .reduceByKey((x,y)-> x+y) //aggregate the values for the same entity pair (met max 4 times, 1 from values & 1 from neighbors for each entity of the pair)                
+                .reduceByKey((x,y)-> x+y) //aggregate the values for the same entity pair (met max 4 times, 1 from values & 1 from neighbors, for each entity of the pair)                
                 .mapToPair(candidates -> new Tuple2<>(candidates._1()._1(), new Tuple2<>(candidates._1()._2(), candidates._2()))) //(-Id,(+id,recipr.score))                                                
-                .subtractByKey(matchesFromTop1Value)  //for the rest, not examined yet...              
-                .groupByKey()
-                .mapValues(x -> {
-                    float max = 0f;
-                    for (Tuple2<Integer,Float> candidate : x) {
-                        if (candidate._2() > max) {
-                            max = candidate._2();
-                        }
-                    }                       
-                    for (Tuple2<Integer,Float> candidate : x) {
-                        if (candidate._2() == max) {                                                                                    
-                            return candidate._1();
-                        }
-                    }
-                    return null;
-                })
-                .filter (x -> x._2() != null)                
+                .subtractByKey(matchesFromTop1Value)  //for the rest, not examined yet...
+                .reduceByKey((x,y) -> x._2() > y._2() ? x : y) //keep the candidate with the highest reciprocal score
+                .mapValues(x-> x._1()) //keep candidate id only and lose the score
                 .union(matchesFromTop1Value);
                 
     }

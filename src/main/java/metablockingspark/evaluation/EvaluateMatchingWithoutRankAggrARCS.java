@@ -118,7 +118,7 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
         System.out.println(blocksFromEI.count()+" blocks have been left after block filtering");
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
-        final int K = Math.max(1, ((Double)Math.floor(BCin)).intValue()); //K = |_BCin -1_|
+        final int K = (args.length == 7) ? Integer.parseInt(args[6]) : Math.max(1, ((Double)Math.floor(BCin)).intValue()); //K = |_BCin -1_|        
         System.out.println(BLOCK_ASSIGNMENTS_ACCUM.value()+" block assignments");
         System.out.println(CLEAN_BLOCK_ACCUM.value()+" clean blocks");
         System.out.println(NUM_COMPARISONS_ACCUM.value()+" comparisons");
@@ -150,18 +150,6 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
                 MIN_SUPPORT_THRESHOLD, K, N, 
                 jsc);
         
-//        List<Tuple2<Integer, Int2FloatLinkedOpenHashMap>> valueSims_SAMPLE  = topKValueCandidates.takeSample(true, 10);
-//        for (Tuple2<Integer, Int2FloatLinkedOpenHashMap> sample : valueSims_SAMPLE) {
-//            System.out.println("Top value sims for entity "+sample._1());
-//            System.out.println(sample._2());
-//        }
-//        
-//        List<Tuple2<Integer, Int2FloatLinkedOpenHashMap>> neihgborSims_SAMPLE  = topKNeighborCandidates.takeSample(true, 10);
-//        for (Tuple2<Integer, Int2FloatLinkedOpenHashMap> sample : neihgborSims_SAMPLE) {
-//            System.out.println("Top neighbor sims for entity "+sample._1());
-//            System.out.println(sample._2());
-//        }
-        
         //reciprocal matching
         System.out.println("Starting reciprocal matching...");
         //JavaPairRDD<Integer,IntArrayList> candidateMatches = new ReciprocalMatchingFromMetaBlocking().getReciprocalCandidateMatches(topKValueCandidates, topKNeighborCandidates);
@@ -183,9 +171,14 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
             GT_SEPARATOR = " ";
         }
         
-        JavaPairRDD<Integer,Integer> gt = Utils.getGroundTruthIdsFromEntityIds(jsc.textFile(entityIds1, PARALLELISM), jsc.textFile(entityIds2, PARALLELISM), jsc.textFile(groundTruthPath), GT_SEPARATOR);
-        gt.cache();
-        gt.saveAsTextFile(groundTruthOutputPath);
+        JavaPairRDD<Integer,Integer> gt;
+        if (groundTruthPath.contains("estaurant") || groundTruthPath.contains("Rexa_DBLP")) {
+            GT_SEPARATOR = "\t";
+            gt = Utils.readGroundTruthIds(jsc.textFile(groundTruthPath), GT_SEPARATOR).cache();
+        } else {
+            gt = Utils.getGroundTruthIdsFromEntityIds(jsc.textFile(entityIds1, PARALLELISM), jsc.textFile(entityIds2, PARALLELISM), jsc.textFile(groundTruthPath), GT_SEPARATOR).cache();            
+            gt.saveAsTextFile(groundTruthOutputPath);
+        }   
         
         JavaPairRDD<Integer,Integer> gt_sample = gt.sample(true, 0.003);
 //      

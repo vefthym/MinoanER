@@ -120,7 +120,7 @@ public class RelationsRank implements Serializable {
     public JavaPairRDD<String,List<Tuple2<Integer, Integer>>> getRelationIndex(JavaRDD<String> rawTriples, String SEPARATOR, Broadcast<Object2IntOpenHashMap<String>> subjects_BV) {        
         return rawTriples        
         .mapToPair(line -> {
-          String[] spo = line.toLowerCase().replaceAll(" \\.$", "").split(SEPARATOR);
+          String[] spo = line.toLowerCase().replaceAll(" \\.$", "").split(SEPARATOR); //lose the ending " ." from valid .nt files
           if (spo.length != 3) {
               return null;
           }
