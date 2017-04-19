@@ -47,13 +47,22 @@ public class ReciprocalMatchingFromMetaBlocking {
                 .keys());
     }
 
-    public JavaPairRDD<Integer, IntArrayList> getReciprocalCandidateMatches(JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates) {
-        return JavaPairRDD.fromJavaRDD(topKValueCandidates
+    /**
+     * Returns ALL reciprocal candidate matches, i.e., all candidate matches suggested from both collections.
+     * @param topKValueCandidates
+     * @param topKNeighborCandidates
+     * @return 
+     */
+    public JavaPairRDD<Integer, IntArrayList> getReciprocalCandidateMatches(JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKNeighborCandidates) {
+        return JavaPairRDD.fromJavaRDD(topKValueCandidates                  
+                .union(topKNeighborCandidates) //bag semantics (a candidate match may appear once or twice per entity)
                 .mapValues(x -> new IntArrayList(x.keySet())) //not sorted!                
-                .union(topKNeighborCandidates) //bag semantics (a candidate match may appear one or twice per entity)
+                .aggregateByKey(new IntOpenHashSet(), //discard duplicate candidates from values and neighbors for the same entity (per dataset)
+                        (x,y) -> {x.addAll(y); return x;}, 
+                        (x,y) -> {x.addAll(y); return x;})
                 .flatMapToPair(pairs -> {
                     int keyId = pairs._1();
-                    List<Tuple2<Tuple2<Integer,Integer>, Byte>> outputPairs = new ArrayList<>(); //byte to save space (not expected to have values > 4)
+                    List<Tuple2<Tuple2<Integer,Integer>, Byte>> outputPairs = new ArrayList<>(); //byte to save space (not expected to have values > 4) (pair, count)
                     if (keyId < 0) {
                         for (int candidate : pairs._2()) { //a candidate may be checked twice (on purpose)
                             outputPairs.add(new Tuple2<>(new Tuple2<>(keyId, candidate), (byte)1));
@@ -66,7 +75,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                     return outputPairs.iterator();
                 })                
                 .reduceByKey((x,y)-> (byte)(x+y))                      
-                .filter(counts -> counts._2 > (byte)1)
+                .filter(counts -> counts._2() > (byte)1) //can be 1 (non-reciprocal) or 2 (reciprocal)
                 .keys())
                 .aggregateByKey(new IntOpenHashSet(), 
                         (x,y) -> {x.add(y); return x;}, 
@@ -77,10 +86,10 @@ public class ReciprocalMatchingFromMetaBlocking {
     
     
     
-    public JavaPairRDD<Integer, Integer> getReciprocalMatches(JavaPairRDD<Integer, Int2FloatOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates) {
+    public JavaPairRDD<Integer, Integer> getReciprocalMatches(JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKNeighborCandidates) {
         return topKValueCandidates
-                .mapValues(x -> new IntArrayList(x.keySet())) //not sorted!                
                 .union(topKNeighborCandidates) //bag semantics (a candidate match may appear once or twice per entity)
+                .mapValues(x -> new IntArrayList(x.keySet())) //not sorted!                                
                 .flatMapToPair(pairs -> {
                     int keyId = pairs._1();
                     List<Tuple2<Tuple2<Integer,Integer>, Byte>> outputPairs = new ArrayList<>(); //byte to save space (not expected to have values > 4)
@@ -96,6 +105,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                     return outputPairs.iterator();
                 })                
                 .reduceByKey((x,y)-> (byte)(x+y)) //reciprocity is here -> the possible values are 1, 2, 3, 4          
+                .filter(x-> x._2() > (byte)1) //reciprocity requirement
                 .mapToPair(candidates -> new Tuple2<>(candidates._1()._1(), new Tuple2<>(candidates._1()._2(), candidates._2()))) //(-Id,(+id,recipr.score))
                 .reduceByKey((x,y) -> x._2() > y._2() ? x : y) //keep the candidate with the highest reciprocal score per entity
                 .mapValues(candidate -> candidate._1()); //keep only the id
@@ -254,8 +264,6 @@ public class ReciprocalMatchingFromMetaBlocking {
     }
     
     
-    
-    
     public JavaPairRDD<Integer, Integer> getReciprocalMatchesTEST4(JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKNeighborCandidates, LongAccumulator ties, LongAccumulator tiesAbove1) {
         
         JavaPairRDD<Integer,Integer> matchesFromTop1Value = topKValueCandidates
@@ -276,13 +284,13 @@ public class ReciprocalMatchingFromMetaBlocking {
         return topKNeighborCandidates
                 .mapValues(x -> {
                     Int2FloatLinkedOpenHashMap scaledDownValues = new Int2FloatLinkedOpenHashMap();
-                    float scaleFactor  = 0.05f;
+                    float scaleFactor  = 0.1f;
                     for (Map.Entry<Integer, Float> entry : x.entrySet()) {
                         scaledDownValues.put(entry.getKey().intValue(), entry.getValue()*scaleFactor);
                     }
                     return scaledDownValues;
                 })
-                .union(topKValueCandidates) //bag semantics (a candidate match may appear once or twice per entity)                                
+                .union(topKValueCandidates) //bag semantics (a candidate match may appear once or twice per entity)                                                
                 .flatMapToPair(pairs -> {
                     int keyId = pairs._1();
                     List<Tuple2<Tuple2<Integer,Integer>, Float>> outputPairs = new ArrayList<>(); //key:(-eId,+eID) value: sim_score (summed)
@@ -291,7 +299,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                             outputPairs.add(new Tuple2<>(new Tuple2<>(keyId, candidate.getKey()), candidate.getValue()));
                         }
                     } else {
-                        float scaleFactor = 0.5f;
+                        float scaleFactor = 1.0f;
                         for (Map.Entry<Integer,Float> candidate : pairs._2().entrySet()) { //a candidate may be checked twice (on purpose)
                             outputPairs.add(new Tuple2<>(new Tuple2<>(candidate.getKey(), keyId), candidate.getValue()*scaleFactor)); //less important than the other dataset
                         }
@@ -299,6 +307,74 @@ public class ReciprocalMatchingFromMetaBlocking {
                     return outputPairs.iterator();
                 })                     
                 .reduceByKey((x,y)-> x+y) //aggregate the values for the same entity pair (met max 4 times, 1 from values & 1 from neighbors, for each entity of the pair)                
+                .mapToPair(candidates -> new Tuple2<>(candidates._1()._1(), new Tuple2<>(candidates._1()._2(), candidates._2()))) //(-Id,(+id,recipr.score))                                                
+                .subtractByKey(matchesFromTop1Value)  //for the rest, not examined yet...
+                .reduceByKey((x,y) -> x._2() > y._2() ? x : y) //keep the candidate with the highest reciprocal score
+                .mapValues(x-> x._1()) //keep candidate id only and lose the score
+                .union(matchesFromTop1Value);
+                
+    }
+    
+    
+    
+    
+    public JavaPairRDD<Integer, Integer> getReciprocalMatchesTEST5(JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKNeighborCandidates, LongAccumulator ties, LongAccumulator tiesAbove1) {
+        
+        JavaPairRDD<Integer,Integer> matchesFromTop1Value = topKValueCandidates
+                .filter(x -> x._1() < 0 && x._2().get(x._2().firstIntKey()) >= 1f) //keep pairs with negative key id and value_sim > 1
+                .mapValues(x -> x.firstIntKey()); //return those pairs as matches //todo: check for ties at first place with scores > 1
+        
+        System.out.println("Found "+matchesFromTop1Value.count()+" match suggestions from top-1 value sim > 1 from collection 2");
+        /*
+        //do the same for positive key ids
+        matchesFromTop1Value = topKValueCandidates
+                .filter(x -> x._1() >= 0 && x._2().get(x._2().firstIntKey()) >= 1f)
+                .mapToPair(match -> new Tuple2<>(match._2().firstIntKey(), match._1()))
+                .subtractByKey(matchesFromTop1Value)
+                .union(matchesFromTop1Value);        
+        
+        System.out.println("Found "+matchesFromTop1Value.count()+" match suggestions from top-1 value sim > 1");        
+        */
+        
+        JavaPairRDD<Integer,Int2FloatLinkedOpenHashMap> candidatesWithAggregateScores = topKNeighborCandidates
+                .mapValues(x -> {
+                    Int2FloatLinkedOpenHashMap scaledDownValues = new Int2FloatLinkedOpenHashMap();
+                    float scaleFactor  = 0.1f;
+                    x.entrySet().stream().forEach(entry -> scaledDownValues.put(entry.getKey().intValue(), entry.getValue()*scaleFactor));
+                    return scaledDownValues;
+                })
+                .union(topKValueCandidates)
+                .aggregateByKey(new Int2FloatLinkedOpenHashMap(), //union semantics (sum the value and neighbor sim scores for the candidates of each collection)
+                        (x,y) -> {
+                            y.entrySet().stream().forEach(entry -> x.addTo(entry.getKey(), entry.getValue()));
+                            return x;
+                        }, 
+                       (x,y) -> {
+                            y.entrySet().stream().forEach(entry -> x.addTo(entry.getKey(), entry.getValue()));
+                            return x;
+                        }); 
+        
+        JavaPairRDD<Tuple2<Integer,Integer>, Float> d1Candidates = candidatesWithAggregateScores
+                .filter(pair -> pair._1() >= 0)
+                .flatMapToPair(pairs -> {                    
+                    List<Tuple2<Tuple2<Integer,Integer>, Float>> outputPairs = new ArrayList<>(); //key:(-eId,+eID) value: sim_score (summed)                    
+                    for (Map.Entry<Integer,Float> candidate : pairs._2().entrySet()) { //a candidate may be checked twice (on purpose)
+                        outputPairs.add(new Tuple2<>(new Tuple2<>(candidate.getKey(), pairs._1()), candidate.getValue()));
+                    }
+                    return outputPairs.iterator();
+                });
+        JavaPairRDD<Tuple2<Integer,Integer>, Float> d2Candidates = candidatesWithAggregateScores
+                .filter(pair -> pair._1() < 0)
+                .flatMapToPair(pairs -> {                    
+                    List<Tuple2<Tuple2<Integer,Integer>, Float>> outputPairs = new ArrayList<>(); //key:(-eId,+eID) value: sim_score (summed)                    
+                    for (Map.Entry<Integer,Float> candidate : pairs._2().entrySet()) { //a candidate may be checked twice (on purpose)
+                        outputPairs.add(new Tuple2<>(new Tuple2<>(pairs._1(), candidate.getKey()), candidate.getValue()));
+                    }
+                    return outputPairs.iterator();
+                });
+        
+        return d1Candidates.join(d2Candidates) //keep only reciprocal candidates
+                .mapValues(x -> x._1()+x._2()) //just sum the scores from the first and the second collection for the same candidate pair (they are most likely equal)
                 .mapToPair(candidates -> new Tuple2<>(candidates._1()._1(), new Tuple2<>(candidates._1()._2(), candidates._2()))) //(-Id,(+id,recipr.score))                                                
                 .subtractByKey(matchesFromTop1Value)  //for the rest, not examined yet...
                 .reduceByKey((x,y) -> x._2() > y._2() ? x : y) //keep the candidate with the highest reciprocal score

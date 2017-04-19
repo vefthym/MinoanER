@@ -141,7 +141,7 @@ public class MetablockingAndReciprocalMatchingARCS {
         blocksFromEI.unpersist();        
         
         System.out.println("Getting the top K neighbor candidates...");
-        JavaPairRDD<Integer, IntArrayList> topKNeighborCandidates = cnp.run(
+        JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKNeighborCandidates = cnp.run2(
                 topKValueCandidates, 
                 jsc.textFile(inputTriples1, PARALLELISM), 
                 jsc.textFile(inputTriples2, PARALLELISM), 
