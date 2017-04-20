@@ -156,7 +156,7 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
         //JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatches(topKValueCandidates, topKNeighborCandidates);        
         LongAccumulator ties = jsc.sc().longAccumulator();
         LongAccumulator tiesAbove1 = jsc.sc().longAccumulator();        
-        JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatchesTEST5(topKValueCandidates, topKNeighborCandidates, ties, tiesAbove1);
+        JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatchesTEST6(topKValueCandidates, topKNeighborCandidates, ties, tiesAbove1);
         
         //Start the evaluation        
         LongAccumulator TPs = jsc.sc().longAccumulator("TPs");
@@ -177,8 +177,9 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
             gt.saveAsTextFile(groundTruthOutputPath);
         }   
         
-        JavaPairRDD<Integer,Integer> gt_sample = gt.sample(true, 0.001);
-      
+        /*
+        JavaPairRDD<Integer,Integer> gt_sample = gt.sample(true, 0.001);      
+        
         List<Tuple2<Integer, Tuple2<Tuple2<Tuple2<Int2FloatLinkedOpenHashMap, Integer>,Int2FloatLinkedOpenHashMap>, Integer>>> samples = topKValueCandidates.join(gt_sample).join(topKNeighborCandidates).join(matches).collect();
         for (Tuple2<Integer, Tuple2<Tuple2<Tuple2<Int2FloatLinkedOpenHashMap, Integer>,Int2FloatLinkedOpenHashMap>, Integer>> sample : samples) {
             System.out.println("\nTop value sims for entity "+sample._1());
@@ -200,7 +201,7 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
             System.out.println(sample._2()._2());
             System.out.println("The correct match is "+sample._2()._1()._2());            
         }
-        
+        */
         
         System.out.println("Finished loading the ground truth with "+ gt.count()+" matches, now evaluating the results...");  
         new EvaluateMatchingResults().evaluateResultsNEW(matches, gt, TPs, FPs, FNs);        

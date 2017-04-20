@@ -324,7 +324,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                 .filter(x -> x._1() < 0 && x._2().get(x._2().firstIntKey()) >= 1f) //keep pairs with negative key id and value_sim > 1
                 .mapValues(x -> x.firstIntKey()); //return those pairs as matches //todo: check for ties at first place with scores > 1
         
-        System.out.println("Found "+matchesFromTop1Value.count()+" match suggestions from top-1 value sim > 1 from collection 2");
+        System.out.println("Found "+matchesFromTop1Value.count()+" match suggestions from top-1 value sim > 1 from collection 2");        
         /*
         //do the same for positive key ids
         matchesFromTop1Value = topKValueCandidates
@@ -339,7 +339,7 @@ public class ReciprocalMatchingFromMetaBlocking {
         JavaPairRDD<Integer,Int2FloatLinkedOpenHashMap> candidatesWithAggregateScores = topKNeighborCandidates
                 .mapValues(x -> {
                     Int2FloatLinkedOpenHashMap scaledDownValues = new Int2FloatLinkedOpenHashMap();
-                    float scaleFactor  = 0.1f;
+                    float scaleFactor  =  0.1f;
                     x.entrySet().stream().forEach(entry -> scaledDownValues.put(entry.getKey().intValue(), entry.getValue()*scaleFactor));
                     return scaledDownValues;
                 })
@@ -373,13 +373,99 @@ public class ReciprocalMatchingFromMetaBlocking {
                     return outputPairs.iterator();
                 });
         
-        return d1Candidates.join(d2Candidates) //keep only reciprocal candidates
+        return d1Candidates.join(d2Candidates) //keep only reciprocal candidates (suggested by both collections)                
                 .mapValues(x -> x._1()+x._2()) //just sum the scores from the first and the second collection for the same candidate pair (they are most likely equal)
                 .mapToPair(candidates -> new Tuple2<>(candidates._1()._1(), new Tuple2<>(candidates._1()._2(), candidates._2()))) //(-Id,(+id,recipr.score))                                                
                 .subtractByKey(matchesFromTop1Value)  //for the rest, not examined yet...
                 .reduceByKey((x,y) -> x._2() > y._2() ? x : y) //keep the candidate with the highest reciprocal score
                 .mapValues(x-> x._1()) //keep candidate id only and lose the score
                 .union(matchesFromTop1Value);
+                
+    }
+    
+    /**
+     * sums the ranks, instead of similarity scores
+     * @param topKValueCandidates
+     * @param topKNeighborCandidates
+     * @param ties
+     * @param tiesAbove1
+     * @return 
+     */
+    public JavaPairRDD<Integer, Integer> getReciprocalMatchesTEST6(JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKNeighborCandidates, LongAccumulator ties, LongAccumulator tiesAbove1) {
+        
+        JavaPairRDD<Integer,Integer> matchesFromTop1Value = topKValueCandidates
+                .filter(x -> x._1() < 0 && x._2().get(x._2().firstIntKey()) >= 1f) //keep pairs with negative key id and value_sim > 1
+                .mapValues(x -> x.firstIntKey()); //return those pairs as matches //todo: check for ties at first place with scores > 1
+        
+        System.out.println("Found "+matchesFromTop1Value.count()+" match suggestions from top-1 value sim > 1 from collection 2");                
+        
+        topKValueCandidates = topKValueCandidates.subtractByKey(matchesFromTop1Value)
+                .mapValues(x -> {
+                    Int2FloatLinkedOpenHashMap scaledDownValues = new Int2FloatLinkedOpenHashMap();                    
+                    int rank = x.size()+1;
+                    float previousScore = 0, thisScore;
+                    int candidatesTiedAtThisScore = 1;
+                    for (Map.Entry<Integer,Float> entry : x.entrySet()) {
+                        thisScore = entry.getValue();
+                        /*if (thisScore == previousScore) { //there is a tie
+                            candidatesTiedAtThisScore++;
+                        } else {*/
+                            rank -= candidatesTiedAtThisScore; //if the first two have the same score they both have rank 1, and the third has rank 1/3 (not 2/3)
+                            candidatesTiedAtThisScore = 1; //reset to 1
+                        //}
+                        scaledDownValues.put(entry.getKey().intValue(), (float)rank/x.size());
+                        previousScore = thisScore;
+                    }                    
+                    return scaledDownValues;
+                });
+                
+        
+        JavaPairRDD<Integer,Int2FloatLinkedOpenHashMap> candidatesWithAggregateScores = topKNeighborCandidates
+                .mapValues(x -> {
+                    Int2FloatLinkedOpenHashMap scaledDownValues = new Int2FloatLinkedOpenHashMap();                    
+                    int rank = x.size();
+                    for (Map.Entry<Integer,Float> entry : x.entrySet()) {
+                        scaledDownValues.put(entry.getKey().intValue(), 0.2f*rank--/x.size());
+                    }                    
+                    return scaledDownValues;
+                })
+                .union(topKValueCandidates)
+                .aggregateByKey(new Int2FloatLinkedOpenHashMap(), //union semantics (sum the value and neighbor sim scores for the candidates of each collection)
+                        (x,y) -> {
+                            y.entrySet().stream().forEach(entry -> x.addTo(entry.getKey(), entry.getValue()));
+                            return x;
+                        }, 
+                       (x,y) -> {
+                            y.entrySet().stream().forEach(entry -> x.addTo(entry.getKey(), entry.getValue()));
+                            return x;
+                        }); 
+        
+        JavaPairRDD<Tuple2<Integer,Integer>, Float> d1Candidates = candidatesWithAggregateScores
+                .filter(pair -> pair._1() >= 0)
+                .flatMapToPair(pairs -> {                    
+                    List<Tuple2<Tuple2<Integer,Integer>, Float>> outputPairs = new ArrayList<>(); //key:(-eId,+eID) value: sim_score (summed)                    
+                    for (Map.Entry<Integer,Float> candidate : pairs._2().entrySet()) { //a candidate may be checked twice (on purpose)
+                        outputPairs.add(new Tuple2<>(new Tuple2<>(candidate.getKey(), pairs._1()), candidate.getValue()));
+                    }
+                    return outputPairs.iterator();
+                });
+        JavaPairRDD<Tuple2<Integer,Integer>, Float> d2Candidates = candidatesWithAggregateScores
+                .filter(pair -> pair._1() < 0)
+                .flatMapToPair(pairs -> {                    
+                    List<Tuple2<Tuple2<Integer,Integer>, Float>> outputPairs = new ArrayList<>(); //key:(-eId,+eID) value: sim_score (summed)                    
+                    for (Map.Entry<Integer,Float> candidate : pairs._2().entrySet()) { //a candidate may be checked twice (on purpose)
+                        outputPairs.add(new Tuple2<>(new Tuple2<>(pairs._1(), candidate.getKey()), candidate.getValue()));
+                    }
+                    return outputPairs.iterator();
+                });
+        
+        return d1Candidates.join(d2Candidates) //keep only reciprocal candidates (suggested by both collections)                
+                .mapValues(x -> x._1()+x._2()) //just sum the scores from the first and the second collection for the same candidate pair (they are most likely equal)
+                .mapToPair(candidates -> new Tuple2<>(candidates._1()._1(), new Tuple2<>(candidates._1()._2(), candidates._2()))) //(-Id,(+id,recipr.score))                                                
+                .subtractByKey(matchesFromTop1Value)  //for the rest, not examined yet...
+                .reduceByKey((x,y) -> x._2() > y._2() ? x : y) //keep the candidate with the highest reciprocal score                
+                .mapValues(x-> x._1()) //keep candidate id only and lose the score
+                .union(matchesFromTop1Value); //TODO: un-comment for the final test
                 
     }
 }
