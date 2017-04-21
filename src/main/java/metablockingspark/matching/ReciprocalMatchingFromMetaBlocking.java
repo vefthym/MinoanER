@@ -354,7 +354,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                             return x;
                         }); 
         
-        JavaPairRDD<Tuple2<Integer,Integer>, Float> d1Candidates = candidatesWithAggregateScores
+        JavaPairRDD<Tuple2<Integer,Integer>, Float> edgesFromD1 = candidatesWithAggregateScores
                 .filter(pair -> pair._1() >= 0)
                 .flatMapToPair(pairs -> {                    
                     List<Tuple2<Tuple2<Integer,Integer>, Float>> outputPairs = new ArrayList<>(); //key:(-eId,+eID) value: sim_score (summed)                    
@@ -363,7 +363,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                     }
                     return outputPairs.iterator();
                 });
-        JavaPairRDD<Tuple2<Integer,Integer>, Float> d2Candidates = candidatesWithAggregateScores
+        JavaPairRDD<Tuple2<Integer,Integer>, Float> edgesFromD2 = candidatesWithAggregateScores
                 .filter(pair -> pair._1() < 0)
                 .flatMapToPair(pairs -> {                    
                     List<Tuple2<Tuple2<Integer,Integer>, Float>> outputPairs = new ArrayList<>(); //key:(-eId,+eID) value: sim_score (summed)                    
@@ -373,7 +373,9 @@ public class ReciprocalMatchingFromMetaBlocking {
                     return outputPairs.iterator();
                 });
         
-        return d1Candidates.join(d2Candidates) //keep only reciprocal candidates (suggested by both collections)                
+        JavaPairRDD<Tuple2<Integer,Integer>, Tuple2<Float,Float>> reciprocalEdges = edgesFromD1.join(edgesFromD2);//keep only reciprocal edges (suggested by both collections)                
+        
+        return reciprocalEdges 
                 .mapValues(x -> x._1()+x._2()) //just sum the scores from the first and the second collection for the same candidate pair (they are most likely equal)
                 .mapToPair(candidates -> new Tuple2<>(candidates._1()._1(), new Tuple2<>(candidates._1()._2(), candidates._2()))) //(-Id,(+id,recipr.score))                                                
                 .subtractByKey(matchesFromTop1Value)  //for the rest, not examined yet...
@@ -399,6 +401,9 @@ public class ReciprocalMatchingFromMetaBlocking {
         
         System.out.println("Found "+matchesFromTop1Value.count()+" match suggestions from top-1 value sim > 1 from collection 2");                
         
+        
+        float valueFactor = 0.9f;
+        
         topKValueCandidates = topKValueCandidates.subtractByKey(matchesFromTop1Value)
                 .mapValues(x -> {
                     Int2FloatLinkedOpenHashMap scaledDownValues = new Int2FloatLinkedOpenHashMap();                    
@@ -413,7 +418,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                             rank -= candidatesTiedAtThisScore; //if the first two have the same score they both have rank 1, and the third has rank 1/3 (not 2/3)
                             candidatesTiedAtThisScore = 1; //reset to 1
                         //}
-                        scaledDownValues.put(entry.getKey().intValue(), (float)rank/x.size());
+                        scaledDownValues.put(entry.getKey().intValue(), valueFactor*rank/x.size());
                         previousScore = thisScore;
                     }                    
                     return scaledDownValues;
@@ -425,7 +430,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                     Int2FloatLinkedOpenHashMap scaledDownValues = new Int2FloatLinkedOpenHashMap();                    
                     int rank = x.size();
                     for (Map.Entry<Integer,Float> entry : x.entrySet()) {
-                        scaledDownValues.put(entry.getKey().intValue(), 0.2f*rank--/x.size());
+                        scaledDownValues.put(entry.getKey().intValue(), (1-valueFactor)*rank--/x.size());
                     }                    
                     return scaledDownValues;
                 })
@@ -440,7 +445,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                             return x;
                         }); 
         
-        JavaPairRDD<Tuple2<Integer,Integer>, Float> d1Candidates = candidatesWithAggregateScores
+        JavaPairRDD<Tuple2<Integer,Integer>, Float> edgesFromD1 = candidatesWithAggregateScores
                 .filter(pair -> pair._1() >= 0)
                 .flatMapToPair(pairs -> {                    
                     List<Tuple2<Tuple2<Integer,Integer>, Float>> outputPairs = new ArrayList<>(); //key:(-eId,+eID) value: sim_score (summed)                    
@@ -449,7 +454,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                     }
                     return outputPairs.iterator();
                 });
-        JavaPairRDD<Tuple2<Integer,Integer>, Float> d2Candidates = candidatesWithAggregateScores
+        JavaPairRDD<Tuple2<Integer,Integer>, Float> edgesFromD2 = candidatesWithAggregateScores
                 .filter(pair -> pair._1() < 0)
                 .flatMapToPair(pairs -> {                    
                     List<Tuple2<Tuple2<Integer,Integer>, Float>> outputPairs = new ArrayList<>(); //key:(-eId,+eID) value: sim_score (summed)                    
@@ -459,13 +464,60 @@ public class ReciprocalMatchingFromMetaBlocking {
                     return outputPairs.iterator();
                 });
         
-        return d1Candidates.join(d2Candidates) //keep only reciprocal candidates (suggested by both collections)                
+        JavaPairRDD<Tuple2<Integer,Integer>, Tuple2<Float,Float>> reciprocalEdges = edgesFromD1.join(edgesFromD2);//keep only reciprocal edges (suggested by both collections)
+        
+        //keep only reciprocal edges from the first heuristic (makes reciprocity the first heuristic)
+        /*
+        matchesFromTop1Value = reciprocalEdges.mapToPair(x-> x._1()) //equivalent to keys(), but keys does not return JavaPairRDD
+                .distinct()
+                .reduceByKey((x,y) -> x) //dummy action to remove duplicate keys
+                .join(matchesFromTop1Value)
+                .mapValues(x -> x._2());
+        System.out.println(matchesFromTop1Value.count()+" of them are reciprocal");                
+        */
+        /*
+        //reciprocity second
+        return reciprocalEdges
                 .mapValues(x -> x._1()+x._2()) //just sum the scores from the first and the second collection for the same candidate pair (they are most likely equal)
                 .mapToPair(candidates -> new Tuple2<>(candidates._1()._1(), new Tuple2<>(candidates._1()._2(), candidates._2()))) //(-Id,(+id,recipr.score))                                                
                 .subtractByKey(matchesFromTop1Value)  //for the rest, not examined yet...
                 .reduceByKey((x,y) -> x._2() > y._2() ? x : y) //keep the candidate with the highest reciprocal score                
                 .mapValues(x-> x._1()) //keep candidate id only and lose the score
                 .union(matchesFromTop1Value); //TODO: un-comment for the final test
-                
+                */
+        
+        //ignore reciprocity
+        /*
+        return edgesFromD1.fullOuterJoin(edgesFromD2)
+                .mapValues(x -> x._1().orElse(0f)+x._2().orElse(0f)) //just sum the scores from the first and the second collection for the same candidate pair (they are most likely equal)
+                .mapToPair(candidates -> new Tuple2<>(candidates._1()._1(), new Tuple2<>(candidates._1()._2(), candidates._2()))) //(-Id,(+id,recipr.score))                                                
+                .subtractByKey(matchesFromTop1Value)  //for the rest, not examined yet...
+                .reduceByKey((x,y) -> x._2() > y._2() ? x : y) //keep the candidate with the highest score                
+                .mapValues(x-> x._1()) //keep candidate id only and lose the score
+                .union(matchesFromTop1Value); //TODO: un-comment for the final test
+        */        
+        
+        
+        
+        //reciprocity last
+        JavaPairRDD<Integer,Iterable<Integer>> reciprocalEdgesPerEntity = reciprocalEdges.mapToPair(x-> x._1()) //equivalent to keys(), but keys does not return JavaPairRDD
+                .groupByKey();
+        return edgesFromD1.fullOuterJoin(edgesFromD2)
+                .mapValues(x -> x._1().orElse(0f)+x._2().orElse(0f)) //just sum the scores from the first and the second collection for the same candidate pair (they are most likely equal)
+                .mapToPair(candidates -> new Tuple2<>(candidates._1()._1(), new Tuple2<>(candidates._1()._2(), candidates._2()))) //(-Id,(+id,recipr.score))                                                
+                .subtractByKey(matchesFromTop1Value)  //for the rest, not examined yet...
+                .reduceByKey((x,y) -> x._2() > y._2() ? x : y) //keep the candidate with the highest reciprocal score                                
+                .mapValues(x-> x._1()) //keep candidate id only and lose the score
+                .join(reciprocalEdgesPerEntity)
+                .filter(x-> {
+                    for (int reciprocalEdge : x._2()._2()) {
+                        if (reciprocalEdge == x._2()._1()) {
+                            return true;
+                        }
+                    }
+                    return false;
+                })
+                .mapValues(x-> x._1())
+                .union(matchesFromTop1Value); //TODO: un-comment for the final test
     }
 }
