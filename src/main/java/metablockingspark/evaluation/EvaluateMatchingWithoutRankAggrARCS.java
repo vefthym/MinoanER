@@ -131,7 +131,8 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
         System.out.println("\n\nStarting CNP...");
         String SEPARATOR = (inputTriples1.endsWith(".tsv"))? "\t" : " ";        
         final float MIN_SUPPORT_THRESHOLD = 0.01f;
-        final int N = 5; //for top-N neighbors
+        final int N = 3; //for top-N relations
+        System.out.println("N = "+N);
         
         System.out.println("Getting the top K value candidates...");
         EntityBasedCNPNeighborsARCS cnp = new EntityBasedCNPNeighborsARCS();        
@@ -178,7 +179,8 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
         }   
         
         /*
-        JavaPairRDD<Integer,Integer> gt_sample = gt.sample(true, 0.001);      
+        double sampleRate = 30.0/gt.count(); //just return 30 results as a sample
+        JavaPairRDD<Integer,Integer> gt_sample = gt.sample(true, sampleRate);      
         
         List<Tuple2<Integer, Tuple2<Tuple2<Tuple2<Int2FloatLinkedOpenHashMap, Integer>,Int2FloatLinkedOpenHashMap>, Integer>>> samples = topKValueCandidates.join(gt_sample).join(topKNeighborCandidates).join(matches).collect();
         for (Tuple2<Integer, Tuple2<Tuple2<Tuple2<Int2FloatLinkedOpenHashMap, Integer>,Int2FloatLinkedOpenHashMap>, Integer>> sample : samples) {
@@ -200,7 +202,7 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
             System.out.println("Top neighbor sims for entity "+sample._1());
             System.out.println(sample._2()._2());
             System.out.println("The correct match is "+sample._2()._1()._2());            
-        }
+        }        
         */
         
         System.out.println("Finished loading the ground truth with "+ gt.count()+" matches, now evaluating the results...");  
@@ -214,8 +216,5 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
         
         spark.stop();
     }
-    
-    
-    
-    
+       
 }

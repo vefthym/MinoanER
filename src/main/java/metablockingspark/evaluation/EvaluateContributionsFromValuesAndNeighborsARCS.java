@@ -131,7 +131,8 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
         System.out.println("\n\nStarting CNP...");
         String SEPARATOR = (inputTriples1.endsWith(".tsv"))? "\t" : " ";        
         final float MIN_SUPPORT_THRESHOLD = 0.01f;
-        final int N = 5; //for top-N neighbors
+        final int N = 3; //for top-N relations
+        System.out.println("N = "+N);
         
         System.out.println("Getting the top K value candidates...");
         EntityBasedCNPNeighborsARCS cnp = new EntityBasedCNPNeighborsARCS();        

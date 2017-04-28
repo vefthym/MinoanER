@@ -16,14 +16,18 @@
 package metablockingspark.relationsWeighting;
 
 import com.google.common.collect.Ordering;
+import it.unimi.dsi.fastutil.floats.FloatOpenHashSet;
+import it.unimi.dsi.fastutil.floats.FloatSet;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.Set;
 import metablockingspark.utils.ComparableIntFloatPair;
 import metablockingspark.utils.ComparableIntFloatPairDescendingComparator;
 import metablockingspark.utils.Utils;
@@ -70,9 +74,10 @@ public class RelationsRank implements Serializable {
         rawTriples.unpersist();        
         relationIndex.persist(StorageLevel.MEMORY_AND_DISK_SER());                
                         
-        List<String> relationsRank = getRelationsRank(relationIndex, MIN_SUPPORT_THRESHOLD, numEntitiesSquared);        
+        List<String> relationsRank = getRelationsRank(relationIndex, MIN_SUPPORT_THRESHOLD, numEntitiesSquared);      
+        System.out.println("Top-5 relations in collection "+(positiveIds?"1: ":"2: ")+Arrays.toString(relationsRank.subList(0, 5).toArray()));
         
-        JavaPairRDD<Integer, IntArrayList> topOutNeighbors = getTopNOutNeighborsPerEntity(relationIndex, relationsRank, N, positiveIds); //action
+        JavaPairRDD<Integer, IntArrayList> topOutNeighbors = getTopOutNeighborsPerEntity(relationIndex, relationsRank, N, positiveIds); //action
         
         relationIndex.unpersist(); 
         
@@ -97,7 +102,7 @@ public class RelationsRank implements Serializable {
     
     
     /**
-     * Returns a list of relations sorted in descending score.      
+     * Returns a list of relations sorted in descending score. The rank of each relation is its index in this list (highest rank = index 0)    
      * @param relationIndex
      * @param minSupportThreshold the minimum support threshold allowed, used for filtering relations with lower support
      * @param numEntitiesSquared
@@ -160,8 +165,8 @@ public class RelationsRank implements Serializable {
         System.out.println(unnormalizedSupports.count()+" relations have been assigned a support value"); // dummy action to trigger execution
         float max_support = unnormalizedSupports.values().max(Ordering.natural());        
         return unnormalizedSupports
-                .mapValues(x-> x/max_support)
-                .filter(x-> x._2()> minSupportThreshold);
+                .mapValues(x-> x/max_support)           //normalize the support values
+                .filter(x-> x._2()> minSupportThreshold); //filter out relations below the min support threshold (infrequent relations)
     }
     
     public JavaPairRDD<String,Float> getDiscriminabilityOfRelations(JavaPairRDD<String,List<Tuple2<Integer, Integer>>> relationIndex) {
@@ -187,14 +192,14 @@ public class RelationsRank implements Serializable {
     }
     
     /**
-     * Get the top-N neighbors (the neighbors found for the top-K relations, based on the local ranking of the relations).
+     * Get the top neighbors (the neighbors found for the top-N relations, based on the local ranking of the relations).
      * @param relationIndex key: relation, value: (subjectId, objectId)
      * @param relationsRank a global ranking of relations per dataset (the rank of each relation is its index in this list, starting from 0 for top-ranked)
      * @param N the N from top-N
      * @param postiveIds true if entity ids should be positive, false, if they should be reversed (-eId), i.e., if it is dataset1, or dataset 2
      * @return 
      */
-    public JavaPairRDD<Integer, IntArrayList> getTopNOutNeighborsPerEntity(JavaPairRDD<String,List<Tuple2<Integer, Integer>>> relationIndex, List<String> relationsRank, int N, boolean postiveIds) {
+    public JavaPairRDD<Integer, IntArrayList> getTopOutNeighborsPerEntity(JavaPairRDD<String,List<Tuple2<Integer, Integer>>> relationIndex, List<String> relationsRank, int N, boolean postiveIds) {
         return relationIndex.flatMapToPair(x-> {
                 List<Tuple2<Integer, Tuple2<String, Integer>>> entities = new ArrayList<>(); //key: subjectId, value: (relation, objectId)
                 for (Tuple2<Integer,Integer> relatedEntities : x._2()) {
@@ -205,8 +210,8 @@ public class RelationsRank implements Serializable {
                     }
                 }
                 return entities.iterator();
-            })                   
-            .combineByKey( //should be faster than groupByKey (keeps local top-Ns before shuffling, like a combiner in MapReduce)
+            })    
+            .combineByKey( //for each entity, keeps local top-Ns before shuffling, like a combiner in MapReduce
             //createCombiner
             relation -> {
                 PriorityQueue<ComparableIntFloatPair> initial = new PriorityQueue<>(new ComparableIntFloatPairDescendingComparator());
@@ -220,7 +225,7 @@ public class RelationsRank implements Serializable {
                 ComparableIntFloatPair c = new ComparableIntFloatPair(relation._2(), relationRank);
                 pq.add(c);         
                 pq = removeSameNeighborWithLowerRank(pq, c); //from duplicate neighbor Ids, keep the one from the relation with the better ranking                                                       
-                if (pq.size() > N) {
+                if (getNumberOfDistinctRelationsInPQ(pq) > N) {
                     pq.poll();
                 }
                 return pq;
@@ -231,7 +236,7 @@ public class RelationsRank implements Serializable {
                     ComparableIntFloatPair c = pq2.poll();                    
                     pq1.add(c);
                     pq1 = removeSameNeighborWithLowerRank(pq1, c);
-                    if (pq1.size() > N) {
+                    if (getNumberOfDistinctRelationsInPQ(pq1) > N) {
                         pq1.poll();
                     }
                 }
@@ -276,5 +281,10 @@ public class RelationsRank implements Serializable {
         }
         return pq;
     }
-    
+
+    private int getNumberOfDistinctRelationsInPQ(PriorityQueue<ComparableIntFloatPair> pq) {
+        FloatSet distinctRelations = new FloatOpenHashSet();        
+        pq.stream().forEach(relation -> distinctRelations.add(relation.getValue())); //adds the order of each relation to the set
+        return distinctRelations.size();
+    }
 }

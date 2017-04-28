@@ -20,6 +20,7 @@ import it.unimi.dsi.fastutil.ints.Int2FloatLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.ints.Int2FloatOpenHashMap;
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.util.Arrays;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import metablockingspark.matching.ReciprocalMatching;
