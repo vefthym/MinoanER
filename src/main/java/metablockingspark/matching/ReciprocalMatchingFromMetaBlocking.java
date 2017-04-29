@@ -477,7 +477,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                 .flatMapToPair(pairs -> {                    
                     List<Tuple2<Tuple2<Integer,Integer>, Float>> outputPairs = new ArrayList<>(); //key:(-eId,+eID) value: sim_score (summed)                    
                     for (Map.Entry<Integer,Float> candidate : pairs._2().entrySet()) { //a candidate may be checked twice (on purpose)
-                        outputPairs.add(new Tuple2<>(new Tuple2<>(pairs._1(), candidate.getKey()), 0.1f * candidate.getValue()));
+                        outputPairs.add(new Tuple2<>(new Tuple2<>(pairs._1(), candidate.getKey()), candidate.getValue()));
                     }
                     return outputPairs.iterator();
                 });

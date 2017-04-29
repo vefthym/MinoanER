@@ -115,7 +115,7 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
         JavaPairRDD<Integer, IntArrayList> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
         blocksFromEI.setName("blocksFromEI").cache(); //a few hundred MBs        
         
-        System.out.println(blocksFromEI.count()+" have been left after block filtering");
+        System.out.println(blocksFromEI.count()+" blocks have been left after block filtering");
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
         final int K = (args.length == 7) ? Integer.parseInt(args[6]) : Math.max(1, ((Double)Math.floor(BCin)).intValue()); //K = |_BCin -1_|        
@@ -131,7 +131,7 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
         System.out.println("\n\nStarting CNP...");
         String SEPARATOR = (inputTriples1.endsWith(".tsv"))? "\t" : " ";        
         final float MIN_SUPPORT_THRESHOLD = 0.01f;
-        final int N = 3; //for top-N relations
+        final int N = (args.length == 8) ? Integer.parseInt(args[7]) : 5; //top-N relations
         System.out.println("N = "+N);
         
         System.out.println("Getting the top K value candidates...");
@@ -199,7 +199,7 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
                         
         System.out.println("Finished loading the ground truth with "+ numKnownMatches+" matches, now evaluating the results...");  
         
-        System.out.println("Evaluate neighbors...");
+        System.out.println("\nEvaluate neighbors...");
         JavaRDD<Integer> matchesFoundFromNeighbors = evaluation.getTruePositivesEntityIdsNEW(neighborResults, gt, TPs, FPs, FNs); 
         matchesFoundFromNeighbors.cache();
         long numMatchesFromNeighbors = matchesFoundFromNeighbors.distinct().count();
@@ -246,7 +246,7 @@ public class EvaluateContributionsFromValuesAndNeighborsARCS extends BlockingEva
         long numMatchesFromValues = matchesFoundFromValues.distinct().count();
         EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
         
-        System.out.println("Matches found from values: "+numMatchesFromValues);
+        System.out.println("\nMatches found from values: "+numMatchesFromValues);
         System.out.println("Matches found from neighbors: "+numMatchesFromNeighbors);
         
         

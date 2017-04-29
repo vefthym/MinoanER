@@ -131,7 +131,7 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
         System.out.println("\n\nStarting CNP...");
         String SEPARATOR = (inputTriples1.endsWith(".tsv"))? "\t" : " ";        
         final float MIN_SUPPORT_THRESHOLD = 0.01f;
-        final int N = 3; //for top-N relations
+        final int N = (args.length == 8) ? Integer.parseInt(args[7]) : 5; //top-N relations
         System.out.println("N = "+N);
         
         System.out.println("Getting the top K value candidates...");
