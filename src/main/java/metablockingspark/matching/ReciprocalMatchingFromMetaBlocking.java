@@ -399,7 +399,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                 .filter(x -> x._1() < 0 && x._2().get(x._2().firstIntKey()) >= 1f) //keep pairs with negative key id and value_sim > 1
                 .mapValues(x -> x.firstIntKey()); //return those pairs as matches //todo: check for ties at first place with scores > 1
         
-        System.out.println("Found "+matchesFromTop1Value.count()+" match suggestions from top-1 value sim > 1 from collection 2");                                
+        System.out.println("Found "+matchesFromTop1Value.count()+" match suggestions from top-1 value sim > 1 from collection 2");    
         
         /*
         matchesFromTop1Value = topKValueCandidates
@@ -410,7 +410,7 @@ public class ReciprocalMatchingFromMetaBlocking {
         System.out.println("Found "+matchesFromTop1Value.count()+" match suggestions from top-1 value sim > 1");                
         */
                 
-        float valueFactor = 0.9f;
+        float valueFactor = 0.8f;
         
         topKValueCandidates = topKValueCandidates.subtractByKey(matchesFromTop1Value)
                 .mapValues(x -> {
@@ -441,18 +441,14 @@ public class ReciprocalMatchingFromMetaBlocking {
                     int candidatesTiedAtThisScore = 1;
                     for (Map.Entry<Integer,Float> entry : x.entrySet()) {
                         thisScore = entry.getValue();
-                        /*if (thisScore == previousScore) { //there is a tie
-                            candidatesTiedAtThisScore++;
-                        } else {*/
                             rank -= candidatesTiedAtThisScore; //if the first two have the same score they both have rank 1, and the third has rank 1/3 (not 2/3)
                             candidatesTiedAtThisScore = 1; //reset to 1
-                        //}
                         scaledDownValues.put(entry.getKey().intValue(), (1-valueFactor)*rank--/x.size());
                         previousScore = thisScore;
                     }                    
                     return scaledDownValues;
                 })
-                .union(topKValueCandidates)
+                .union(topKValueCandidates)                
                 .aggregateByKey(new Int2FloatLinkedOpenHashMap(), //union semantics (sum the value and neighbor sim scores for the candidates of each collection)
                         (x,y) -> {
                             y.entrySet().stream().forEach(entry -> x.addTo(entry.getKey(), entry.getValue()));
@@ -462,6 +458,8 @@ public class ReciprocalMatchingFromMetaBlocking {
                             y.entrySet().stream().forEach(entry -> x.addTo(entry.getKey(), entry.getValue()));
                             return x;
                         }); 
+        
+        
         
         JavaPairRDD<Tuple2<Integer,Integer>, Float> edgesFromD1 = candidatesWithAggregateScores
                 .filter(pair -> pair._1() >= 0)
@@ -505,6 +503,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                 .union(matchesFromTop1Value);
          */       
         
+        
         /*
         //ignore reciprocity        
         return edgesFromD1.fullOuterJoin(edgesFromD2)
@@ -514,7 +513,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                 .reduceByKey((x,y) -> x._2() > y._2() ? x : y) //keep the candidate with the highest score                
                 .mapValues(x-> x._1()) //keep candidate id only and lose the score
                 .union(matchesFromTop1Value); //TODO: un-comment for the final test
-         */       
+           */   
         
         
         
@@ -537,6 +536,7 @@ public class ReciprocalMatchingFromMetaBlocking {
                     return false;
                 })
                 .mapValues(x-> x._1())
-                .union(matchesFromTop1Value);                
+                .union(matchesFromTop1Value);     
+        
     }
 }

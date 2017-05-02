@@ -217,7 +217,7 @@ public class Utils {
                 
             .config("spark.executor.instances", NUM_EXECUTORS)
             .config("spark.executor.cores", NUM_EXECUTOR_CORES)
-            .config("spark.executor.memory", "50G")
+            .config("spark.executor.memory", "55G")
             
             .config("spark.driver.maxResultSize", "2g")
             
