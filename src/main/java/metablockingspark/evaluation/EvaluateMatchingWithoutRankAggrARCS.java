@@ -154,10 +154,8 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
         //reciprocal matching
         System.out.println("Starting reciprocal matching...");
         //JavaPairRDD<Integer,IntArrayList> candidateMatches = new ReciprocalMatchingFromMetaBlocking().getReciprocalCandidateMatches(topKValueCandidates, topKNeighborCandidates);
-        //JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatches(topKValueCandidates, topKNeighborCandidates);        
-        LongAccumulator ties = jsc.sc().longAccumulator();
-        LongAccumulator tiesAbove1 = jsc.sc().longAccumulator();        
-        JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatchesTEST6(topKValueCandidates, topKNeighborCandidates, ties, tiesAbove1);
+        //JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatches(topKValueCandidates, topKNeighborCandidates);                
+        JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatchesTEST6(topKValueCandidates, topKNeighborCandidates);
         
         //Start the evaluation        
         LongAccumulator TPs = jsc.sc().longAccumulator("TPs");
@@ -209,8 +207,6 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
         new EvaluateMatchingResults().evaluateResultsNEW(matches, gt, TPs, FPs, FNs);        
         //new EvaluateMatchingWithoutRankAggrARCS().evaluateBlockingResults(candidateMatches, gt, TPs, FPs, FNs, false);
         
-        System.out.println("Ties: "+ties.value());
-        System.out.println("Ties in scores > 1: "+tiesAbove1.value());
         System.out.println("Evaluation finished successfully.");
         EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
         

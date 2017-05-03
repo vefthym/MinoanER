@@ -389,11 +389,9 @@ public class ReciprocalMatchingFromMetaBlocking {
      * sums the ranks, instead of similarity scores
      * @param topKValueCandidates
      * @param topKNeighborCandidates
-     * @param ties
-     * @param tiesAbove1
      * @return 
      */
-    public JavaPairRDD<Integer, Integer> getReciprocalMatchesTEST6(JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKNeighborCandidates, LongAccumulator ties, LongAccumulator tiesAbove1) {
+    public JavaPairRDD<Integer, Integer> getReciprocalMatchesTEST6(JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKNeighborCandidates) {
         
         JavaPairRDD<Integer,Integer> matchesFromTop1Value = topKValueCandidates
                 .filter(x -> x._1() < 0 && x._2().get(x._2().firstIntKey()) >= 1f) //keep pairs with negative key id and value_sim > 1
@@ -410,7 +408,7 @@ public class ReciprocalMatchingFromMetaBlocking {
         System.out.println("Found "+matchesFromTop1Value.count()+" match suggestions from top-1 value sim > 1");                
         */
                 
-        float valueFactor = 0.8f;
+        float valueFactor = 0.6f;
         
         topKValueCandidates = topKValueCandidates.subtractByKey(matchesFromTop1Value)
                 .mapValues(x -> {
