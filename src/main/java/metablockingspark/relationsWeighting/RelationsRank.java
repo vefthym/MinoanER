@@ -57,7 +57,7 @@ public class RelationsRank implements Serializable {
      * @return 
      */
     public Map<Integer,IntArrayList> run(JavaRDD<String> rawTriples, String SEPARATOR, JavaRDD<String> entityIdsRDD, float MIN_SUPPORT_THRESHOLD, int N, boolean positiveIds, JavaSparkContext jsc) {
-        rawTriples.persist(StorageLevel.MEMORY_AND_DISK_SER());        
+        //rawTriples.persist(StorageLevel.MEMORY_AND_DISK_SER());        
         
         //List<String> subjects = Utils.getEntityUrlsFromEntityRDDInOrder(rawTriples, SEPARATOR); //a list of (distinct) subject URLs, keeping insertion order (from original triples file)        
         //Object2IntOpenHashMap<String> subjects = Utils.getEntityIdsMapping(rawTriples, SEPARATOR);
@@ -71,7 +71,7 @@ public class RelationsRank implements Serializable {
          
         JavaPairRDD<String,List<Tuple2<Integer, Integer>>> relationIndex = getRelationIndex(rawTriples, SEPARATOR, entityIds_BV); //a list of (s,o) for each predicate      
         
-        rawTriples.unpersist();        
+        //rawTriples.unpersist();        
         relationIndex.persist(StorageLevel.MEMORY_AND_DISK_SER());                
                         
         List<String> relationsRank = getRelationsRank(relationIndex, MIN_SUPPORT_THRESHOLD, numEntitiesSquared);      

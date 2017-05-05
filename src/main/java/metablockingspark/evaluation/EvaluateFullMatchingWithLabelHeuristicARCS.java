@@ -18,9 +18,13 @@ package metablockingspark.evaluation;
 import it.unimi.dsi.fastutil.ints.Int2FloatLinkedOpenHashMap;
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighborsARCS;
+import metablockingspark.matching.LabelMatchingHeuristic;
 import metablockingspark.matching.ReciprocalMatchingFromMetaBlocking;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
@@ -28,6 +32,7 @@ import metablockingspark.utils.Utils;
 import metablockingspark.workflow.FullMetaBlockingWorkflow;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
+import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.storage.StorageLevel;
@@ -37,7 +42,7 @@ import org.apache.spark.util.LongAccumulator;
  *
  * @author vefthym
  */
-public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
+public class EvaluateFullMatchingWithLabelHeuristicARCS extends BlockingEvaluation {
     
     public static void main(String[] args) {
         String tmpPath;        
@@ -56,7 +61,7 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
             inputTriples2 = "";
             entityIds1 = "";
             entityIds2 = "";
-            groundTruthPath = ""; 
+            groundTruthPath = "";             
         } else if (args.length >= 6) {            
             tmpPath = "/file:/tmp";
             //master = "spark://master:7077";
@@ -65,7 +70,7 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
             inputTriples2 = args[2];
             entityIds1 = args[3];
             entityIds2 = args[4];
-            groundTruthPath = args[5];
+            groundTruthPath = args[5];                        
         } else {
             System.out.println("You can run Metablocking with the following arguments:\n"
                     + "0: inputBlocking\n"
@@ -86,10 +91,42 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
         //start the processing//
         ////////////////////////
         
+        String SEPARATOR = (inputTriples1.endsWith(".tsv"))? "\t" : " ";        
+        
+        //YAGO-IMDb
+        Set<String> labelAtts1 = new HashSet<>(Arrays.asList("rdfs:label", "label", "skos:prefLabel"));
+        Set<String> labelAtts2 = labelAtts1;
+        
+        if (inputTriples1.contains("music")) {        
+            //BBCmusic
+            labelAtts1 = new HashSet<>(Arrays.asList("<http://purl.org/dc/elements/1.1/title>", "<http://open.vocab.org/terms/sortLabel>", "<http://xmlns.com/foaf/0.1/name>"));
+            labelAtts2 = new HashSet<>(Arrays.asList("<http://www.w3.org/2000/01/rdf-schema#label>", "<http://dbpedia.org/property/name>", "<http://xmlns.com/foaf/0.1/name>"));
+        } else if (inputTriples1.contains("rexa")) {
+            //Rexa-DBLP
+            labelAtts1 = new HashSet<>(Arrays.asList("http://xmlns.com/foaf/0.1/name", "http://www.w3.org/2000/01/rdf-schema#label"));
+            labelAtts2 = labelAtts1;
+        }
+        
+        JavaRDD<String> triples1 = jsc.textFile(inputTriples1, PARALLELISM).setName("triples1").persist(StorageLevel.MEMORY_AND_DISK_SER());        
+        JavaRDD<String> triples2 = jsc.textFile(inputTriples2, PARALLELISM).setName("triples2").persist(StorageLevel.MEMORY_AND_DISK_SER());        
+        JavaRDD<String> ids1 = jsc.textFile(entityIds1, PARALLELISM).setName("ids1").cache();
+        JavaRDD<String> ids2 = jsc.textFile(entityIds2, PARALLELISM).setName("ids2").cache();
+        
+        //label matching heuristic first!
+        JavaPairRDD<Integer,Integer> matchesFromLabels = new LabelMatchingHeuristic().getMatchesFromLabels(triples1, triples2, ids1, ids2, SEPARATOR, labelAtts1, labelAtts2);
+        matchesFromLabels.setName("matchesFromLabels").cache();
+        
         //Block Filtering
         System.out.println("\n\nStarting BlockFiltering, reading from "+inputPath);
         LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();        
-        JavaPairRDD<Integer,IntArrayList> entityIndex = new BlockFilteringAdvanced().run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
+        JavaPairRDD<Integer,IntArrayList> entityIndex = new BlockFilteringAdvanced().run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM);         
+        
+        
+        //we should not remove the matched entities, since they may help identify matches in their neighborhoods!
+        
+        //remove already matched entities from entity index        
+        //JavaPairRDD<Integer, Integer> matchesFromLabelsReversed = matchesFromLabels.mapToPair(x->x.swap());                
+        //entityIndex = entityIndex.subtractByKey(matchesFromLabels).subtractByKey(matchesFromLabelsReversed);        
         entityIndex.setName("entityIndex").cache();
         
         
@@ -113,8 +150,7 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
         entityIndex.unpersist();
         
         //CNP
-        System.out.println("\n\nStarting CNP...");
-        String SEPARATOR = (inputTriples1.endsWith(".tsv"))? "\t" : " ";        
+        System.out.println("\n\nStarting CNP...");        
         final float MIN_SUPPORT_THRESHOLD = 0.01f;
         final int N = (args.length >= 8) ? Integer.parseInt(args[7]) : 5; //top-N relations
         System.out.println("N = "+N);
@@ -129,21 +165,28 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
         System.out.println("Getting the top K neighbor candidates...");
         JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKNeighborCandidates = cnp.run2(
                 topKValueCandidates, 
-                jsc.textFile(inputTriples1, PARALLELISM), 
-                jsc.textFile(inputTriples2, PARALLELISM), 
+                triples1, 
+                triples2, 
                 SEPARATOR, 
-                jsc.textFile(entityIds1),
-                jsc.textFile(entityIds2),
+                ids1,
+                ids2,
                 MIN_SUPPORT_THRESHOLD, K, N, 
                 jsc);
+        
+        triples1.unpersist();
+        triples2.unpersist();
         
         //reciprocal matching
         System.out.println("Starting reciprocal matching...");
         //JavaPairRDD<Integer,IntArrayList> candidateMatches = new ReciprocalMatchingFromMetaBlocking().getReciprocalCandidateMatches(topKValueCandidates, topKNeighborCandidates);
         //JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatchesFromTop1Candidates(topKValueCandidates, topKNeighborCandidates);                
-        JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatches(topKValueCandidates, topKNeighborCandidates);
+        JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking()
+                .getReciprocalMatches(topKValueCandidates, topKNeighborCandidates)
+                .subtractByKey(matchesFromLabels)
+                .union(matchesFromLabels);
         
         topKValueCandidates.unpersist();
+        matchesFromLabels.unpersist();
         
         //Start the evaluation        
         LongAccumulator TPs = jsc.sc().longAccumulator("TPs");
@@ -160,42 +203,16 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
             GT_SEPARATOR = "\t";
             gt = Utils.readGroundTruthIds(jsc.textFile(groundTruthPath), GT_SEPARATOR).cache();
         } else {
-            gt = Utils.getGroundTruthIdsFromEntityIds(jsc.textFile(entityIds1, PARALLELISM), jsc.textFile(entityIds2, PARALLELISM), jsc.textFile(groundTruthPath), GT_SEPARATOR).cache();            
+            gt = Utils.getGroundTruthIdsFromEntityIds(ids1, ids2, jsc.textFile(groundTruthPath), GT_SEPARATOR).cache();                        
         }   
-        
-        /*
-        double sampleRate = 30.0/gt.count(); //just return 30 results as a sample
-        JavaPairRDD<Integer,Integer> gt_sample = gt.sample(true, sampleRate);      
-        
-        List<Tuple2<Integer, Tuple2<Tuple2<Tuple2<Int2FloatLinkedOpenHashMap, Integer>,Int2FloatLinkedOpenHashMap>, Integer>>> samples = topKValueCandidates.join(gt_sample).join(topKNeighborCandidates).join(matches).collect();
-        for (Tuple2<Integer, Tuple2<Tuple2<Tuple2<Int2FloatLinkedOpenHashMap, Integer>,Int2FloatLinkedOpenHashMap>, Integer>> sample : samples) {
-            System.out.println("\nTop value sims for entity "+sample._1());
-            System.out.println(sample._2()._1()._1()._1());
-            System.out.println("Top neighbor sims for entity "+sample._1());
-            System.out.println(sample._2()._1()._2());
-            System.out.println("The correct match is "+sample._2()._1()._1()._2());    
-            System.out.println("The returned result is "+sample._2()._2());
-        }        
-  
-        System.out.println("\n\nNow printing candidates from reversed ground truth:\n\n");
-        
-        JavaPairRDD<Integer,Integer> gt_sampleReverse = gt_sample.mapToPair(x -> x.swap());
-        List<Tuple2<Integer, Tuple2<Tuple2<Int2FloatLinkedOpenHashMap, Integer>, Int2FloatLinkedOpenHashMap>>> reverseSamples = topKValueCandidates.join(gt_sampleReverse).join(topKNeighborCandidates).collect();
-        for (Tuple2<Integer, Tuple2<Tuple2<Int2FloatLinkedOpenHashMap, Integer>, Int2FloatLinkedOpenHashMap>> sample : reverseSamples) {
-            System.out.println("\nTop value sims for entity "+sample._1());
-            System.out.println(sample._2()._1()._1());
-            System.out.println("Top neighbor sims for entity "+sample._1());
-            System.out.println(sample._2()._2());
-            System.out.println("The correct match is "+sample._2()._1()._2());            
-        }        
-        */
+        gt.cache();
         
         System.out.println("Finished loading the ground truth with "+ gt.count()+" matches, now evaluating the results...");  
         new EvaluateMatchingResults().evaluateResultsNEW(matches, gt, TPs, FPs, FNs);        
         //new EvaluateMatchingWithoutRankAggrARCS().evaluateBlockingResults(candidateMatches, gt, TPs, FPs, FNs, false);
         
         System.out.println("Evaluation finished successfully.");
-        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());   
+        EvaluateMatchingResults.printResults(TPs.value(), FPs.value(), FNs.value());
         
         spark.stop();
     }

@@ -19,9 +19,13 @@ package metablockingspark.workflow;
 import it.unimi.dsi.fastutil.ints.Int2FloatLinkedOpenHashMap;
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import metablockingspark.entityBased.neighbors.EntityBasedCNPNeighborsARCS;
+import metablockingspark.matching.LabelMatchingHeuristic;
 import metablockingspark.matching.ReciprocalMatchingFromMetaBlocking;
 import metablockingspark.preprocessing.BlockFilteringAdvanced;
 import metablockingspark.preprocessing.BlocksFromEntityIndex;
@@ -36,7 +40,7 @@ import org.apache.spark.util.LongAccumulator;
  *
  * @author vefthym
  */
-public class MetablockingAndReciprocalMatchingARCS {
+public class MetablockingAndReciprocalMatchingARCSWithLabelHeuristic {
     
     
     
@@ -97,6 +101,25 @@ public class MetablockingAndReciprocalMatchingARCS {
         //start the processing//
         ////////////////////////
         
+        String SEPARATOR = (inputTriples1.endsWith(".tsv"))? "\t" : " ";        
+        
+        //YAGO-IMDb
+        Set<String> labelAtts1 = new HashSet<>(Arrays.asList("rdfs:label", "label", "skos:prefLabel"));
+        Set<String> labelAtts2 = labelAtts1;
+        
+        if (inputTriples1.contains("music")) {        
+            //BBCmusic
+            labelAtts1 = new HashSet<>(Arrays.asList("<http://purl.org/dc/elements/1.1/title>", "<http://open.vocab.org/terms/sortLabel>", "<http://xmlns.com/foaf/0.1/name>"));
+            labelAtts2 = new HashSet<>(Arrays.asList("<http://www.w3.org/2000/01/rdf-schema#label>", "<http://dbpedia.org/property/name>", "<http://xmlns.com/foaf/0.1/name>"));
+        } else if (inputTriples1.contains("rexa")) {
+            //Rexa-DBLP
+            labelAtts1 = new HashSet<>(Arrays.asList("http://xmlns.com/foaf/0.1/name", "http://www.w3.org/2000/01/rdf-schema#label"));
+            labelAtts2 = labelAtts1;
+        }
+        
+        //label matching heuristic first!
+        JavaPairRDD<Integer,Integer> matchesFromLabels = new LabelMatchingHeuristic().getMatchesFromLabels(jsc.textFile(inputTriples1, PARALLELISM), jsc.textFile(inputTriples2, PARALLELISM), jsc.textFile(entityIds1, PARALLELISM), jsc.textFile(entityIds2, PARALLELISM), SEPARATOR, labelAtts1, labelAtts2);        
+        
         //Block Filtering
         System.out.println("\n\nStarting BlockFiltering, reading from "+inputPath);
         LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();
@@ -104,6 +127,9 @@ public class MetablockingAndReciprocalMatchingARCS {
         JavaPairRDD<Integer,IntArrayList> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
         entityIndex.setName("entityIndex").cache();
         
+        //remove already matches entities from entity index
+        entityIndex = entityIndex.subtractByKey(matchesFromLabels);
+        //entityIndex = entityIndex.subtractByKey(matchesFromLabels.values());
         
         //Blocks From Entity Index
         System.out.println("\n\nStarting BlocksFromEntityIndex...");                
@@ -126,8 +152,7 @@ public class MetablockingAndReciprocalMatchingARCS {
         entityIndex.unpersist();
         
         //CNP
-        System.out.println("\n\nStarting CNP...");
-        String SEPARATOR = (inputTriples1.endsWith(".tsv"))? "\t" : " ";        
+        System.out.println("\n\nStarting CNP...");        
         final float MIN_SUPPORT_THRESHOLD = 0.01f;
         final int N = (args.length >= 8) ? Integer.parseInt(args[7]) : 5; //top-N relations
         
