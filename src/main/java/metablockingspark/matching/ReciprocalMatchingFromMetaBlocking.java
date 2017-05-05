@@ -107,7 +107,7 @@ public class ReciprocalMatchingFromMetaBlocking {
         */
                 
         float valueFactor = 0.6f;
-        System.out.println("Value factor="+valueFactor);
+        System.out.println("Value factor = "+valueFactor);
         
         topKValueCandidates = topKValueCandidates.subtractByKey(matchesFromTop1Value)
                 .mapValues(x -> {

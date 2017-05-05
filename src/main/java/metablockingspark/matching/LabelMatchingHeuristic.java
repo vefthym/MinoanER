@@ -46,7 +46,7 @@ public class LabelMatchingHeuristic {
         JavaPairRDD<String,Integer> labelBlocks2 = getLabelBlocks(inputTriples2, labelAtts2, entityIds2, SEPARATOR, false);
         
         return labelBlocks2.join(labelBlocks1) //get blocks from labels existing in both collections (inner join) (first D2, to keep negative ids first)
-                .reduceByKey((x,y) -> x.equals(y) ? x : null) //if the block has more than two (one pair of) entities, skip this block
+                .reduceByKey((x,y) -> x != null && x.equals(y) ? x : null) //if the block has more than two (one pair of) entities, skip this block
                 .filter(x-> x._2() != null)
                 .mapToPair(pair -> new Tuple2<>(pair._2()._1(), pair._2()._2()))
                 .distinct()
@@ -55,6 +55,15 @@ public class LabelMatchingHeuristic {
                 
     }
     
+    /**
+     * Return an RDD with keys: label objects, and values: entity ids from a single collection, having this label
+     * @param inputTriples
+     * @param labelAtts
+     * @param entityIds
+     * @param SEPARATOR
+     * @param positiveIds
+     * @return 
+     */
     private JavaPairRDD<String,Integer> getLabelBlocks(JavaRDD<String> inputTriples, Set<String> labelAtts, JavaRDD<String> entityIds, String SEPARATOR, boolean positiveIds) {
         Object2IntOpenHashMap<String> urls1 = Utils.readEntityIdsMapping(entityIds, positiveIds);
         return inputTriples.mapToPair(line -> {
@@ -74,7 +83,8 @@ public class LabelMatchingHeuristic {
               return null;
           }          
         })
-        .filter(x-> x!= null);
+        .filter(x-> x!= null)
+        .distinct();
     }
     
 }
