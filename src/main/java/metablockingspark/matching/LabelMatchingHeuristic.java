@@ -46,7 +46,7 @@ public class LabelMatchingHeuristic {
         JavaPairRDD<String,Integer> labelBlocks2 = getLabelBlocks(inputTriples2, labelAtts2, entityIds2, SEPARATOR, false);
         
         return labelBlocks2.join(labelBlocks1) //get blocks from labels existing in both collections (inner join) (first D2, to keep negative ids first)
-                .reduceByKey((x,y) -> null) //if the block has more than two (one pair of) entities, skip this block
+                .reduceByKey((x,y) -> x.equals(y) ? x : null) //if the block has more than two (one pair of) entities, skip this block
                 .filter(x-> x._2() != null)
                 .mapToPair(pair -> new Tuple2<>(pair._2()._1(), pair._2()._2()))
                 .distinct()
