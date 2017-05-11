@@ -100,6 +100,10 @@ public class EvaluateFullMatchingWithLabelHeuristicARCS extends BlockingEvaluati
             //Rexa-DBLP
             labelAtts1 = new HashSet<>(Arrays.asList("http://xmlns.com/foaf/0.1/name", "http://www.w3.org/2000/01/rdf-schema#label"));
             labelAtts2 = labelAtts1;
+        } else if (inputTriples1.contains("estaurant")) {
+            //Restaurants
+            labelAtts1 = new HashSet<>(Arrays.asList("<http://www.okkam.org/ontology_restaurant1.owl#name>"));
+            labelAtts2 = new HashSet<>(Arrays.asList("<http://www.okkam.org/ontology_restaurant2.owl#name>"));
         }
         
         JavaRDD<String> triples1 = jsc.textFile(inputTriples1, PARALLELISM).setName("triples1").persist(StorageLevel.MEMORY_AND_DISK_SER());        
@@ -201,7 +205,7 @@ public class EvaluateFullMatchingWithLabelHeuristicARCS extends BlockingEvaluati
             gt = Utils.getGroundTruthIdsFromEntityIds(ids1, ids2, jsc.textFile(groundTruthPath), GT_SEPARATOR).cache();                        
         }   
         gt.cache();
-        
+                
         System.out.println("Finished loading the ground truth with "+ gt.count()+" matches, now evaluating the results...");  
         new EvaluateMatchingResults().evaluateResultsNEW(matches, gt, TPs, FPs, FNs);        
         //new EvaluateMatchingWithoutRankAggrARCS().evaluateBlockingResults(candidateMatches, gt, TPs, FPs, FNs, false);

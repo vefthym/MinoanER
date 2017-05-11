@@ -75,7 +75,7 @@ public class RelationsRank implements Serializable {
         relationIndex.persist(StorageLevel.MEMORY_AND_DISK_SER());                
                         
         List<String> relationsRank = getRelationsRank(relationIndex, MIN_SUPPORT_THRESHOLD, numEntitiesSquared);      
-        System.out.println("Top-5 relations in collection "+(positiveIds?"1: ":"2: ")+Arrays.toString(relationsRank.subList(0, 5).toArray()));
+        System.out.println("Top-5 relations in collection "+(positiveIds?"1: ":"2: ")+Arrays.toString(relationsRank.subList(0, Math.min(5,relationsRank.size())).toArray()));
         
         JavaPairRDD<Integer, IntArrayList> topOutNeighbors = getTopOutNeighborsPerEntity(relationIndex, relationsRank, N, positiveIds); //action
         

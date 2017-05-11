@@ -188,7 +188,7 @@ public class ReciprocalMatchingFromMetaBlocking {
         
         
         /*
-        //ignore reciprocity        
+        //ignore reciprocity     (to evaluate H4)   
         return edgesFromD1.fullOuterJoin(edgesFromD2)
                 .mapValues(x -> x._1().orElse(0f)+x._2().orElse(0f)) //just sum the scores from the first and the second collection for the same candidate pair (they are most likely equal)
                 .mapToPair(candidates -> new Tuple2<>(candidates._1()._1(), new Tuple2<>(candidates._1()._2(), candidates._2()))) //(-Id,(+id,recipr.score))                                                
@@ -196,11 +196,11 @@ public class ReciprocalMatchingFromMetaBlocking {
                 .reduceByKey((x,y) -> x._2() > y._2() ? x : y) //keep the candidate with the highest score                
                 .mapValues(x-> x._1()) //keep candidate id only and lose the score
                 .union(matchesFromTop1Value); //TODO: un-comment for the final test
-           */   
+         */     
         
         
         
-        //reciprocity last        
+        //reciprocity last  
         JavaPairRDD<Integer,Iterable<Integer>> reciprocalEdgesPerEntity = reciprocalEdges.mapToPair(x-> x._1()) //equivalent to keys(), but keys() does not return JavaPairRDD
                 .groupByKey();
         return edgesFromD1.fullOuterJoin(edgesFromD2)
@@ -220,6 +220,5 @@ public class ReciprocalMatchingFromMetaBlocking {
                 })
                 .mapValues(x-> x._1())
                 .union(matchesFromTop1Value);    
-        
     }
 }
