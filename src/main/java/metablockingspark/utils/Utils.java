@@ -200,7 +200,7 @@ public class Utils {
      * @return 
      */
     public static SparkSession setUpSpark(String appName, int parallelismFactor, String tmpPath) {
-        final int NUM_CORES_IN_CLUSTER = 152; //152 in ISL cluster, 28 in okeanos cluster
+        final int NUM_CORES_IN_CLUSTER = 152; //152 in ISL cluster, 28 in okeanos cluster (for speedup 152,114,72,36)
         final int NUM_WORKERS = 4; //4 in ISL cluster, 14 in okeanos cluster
         final int NUM_EXECUTORS = NUM_WORKERS * 3;
         final int NUM_EXECUTOR_CORES = NUM_CORES_IN_CLUSTER/NUM_EXECUTORS;
@@ -216,7 +216,7 @@ public class Utils {
             .config("spark.executor.heartbeatInterval", "20s")    
                 
             .config("spark.executor.instances", NUM_EXECUTORS)
-            .config("spark.executor.cores", NUM_EXECUTOR_CORES)
+            .config("spark.executor.cores", NUM_EXECUTOR_CORES) //speedup tests: 12,9,6,3 OR 12,8,4,1
             .config("spark.executor.memory", "55G")
             
             .config("spark.driver.maxResultSize", "2g")

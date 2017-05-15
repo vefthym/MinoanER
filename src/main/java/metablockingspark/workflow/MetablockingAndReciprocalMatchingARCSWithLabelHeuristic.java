@@ -32,8 +32,10 @@ import metablockingspark.preprocessing.BlocksFromEntityIndex;
 import metablockingspark.utils.Utils;
 import org.apache.parquet.it.unimi.dsi.fastutil.ints.IntArrayList;
 import org.apache.spark.api.java.JavaPairRDD;
+import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.storage.StorageLevel;
 import org.apache.spark.util.LongAccumulator;
 
 /**
@@ -115,31 +117,43 @@ public class MetablockingAndReciprocalMatchingARCSWithLabelHeuristic {
             //Rexa-DBLP
             labelAtts1 = new HashSet<>(Arrays.asList("http://xmlns.com/foaf/0.1/name", "http://www.w3.org/2000/01/rdf-schema#label"));
             labelAtts2 = labelAtts1;
+        } else if (inputTriples1.contains("estaurant")) {
+            //Restaurants
+            labelAtts1 = new HashSet<>(Arrays.asList("<http://www.okkam.org/ontology_restaurant1.owl#name>"));
+            labelAtts2 = new HashSet<>(Arrays.asList("<http://www.okkam.org/ontology_restaurant2.owl#name>"));
         }
         
+        JavaRDD<String> triples1 = jsc.textFile(inputTriples1, PARALLELISM).setName("triples1").persist(StorageLevel.MEMORY_AND_DISK_SER());        
+        JavaRDD<String> triples2 = jsc.textFile(inputTriples2, PARALLELISM).setName("triples2").persist(StorageLevel.MEMORY_AND_DISK_SER());        
+        JavaRDD<String> ids1 = jsc.textFile(entityIds1, PARALLELISM).setName("ids1").cache();
+        JavaRDD<String> ids2 = jsc.textFile(entityIds2, PARALLELISM).setName("ids2").cache();
+        
         //label matching heuristic first!
-        JavaPairRDD<Integer,Integer> matchesFromLabels = new LabelMatchingHeuristic().getMatchesFromLabels(jsc.textFile(inputTriples1, PARALLELISM), jsc.textFile(inputTriples2, PARALLELISM), jsc.textFile(entityIds1, PARALLELISM), jsc.textFile(entityIds2, PARALLELISM), SEPARATOR, labelAtts1, labelAtts2);        
+        JavaPairRDD<Integer,Integer> matchesFromLabels = new LabelMatchingHeuristic().getMatchesFromLabels(triples1, triples2, ids1, ids2, SEPARATOR, labelAtts1, labelAtts2);
+        matchesFromLabels.setName("matchesFromLabels").cache();
         
         //Block Filtering
         System.out.println("\n\nStarting BlockFiltering, reading from "+inputPath);
-        LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();
-        BlockFilteringAdvanced bf = new BlockFilteringAdvanced();
-        JavaPairRDD<Integer,IntArrayList> entityIndex = bf.run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM); 
+        LongAccumulator BLOCK_ASSIGNMENTS_ACCUM = jsc.sc().longAccumulator();        
+        JavaPairRDD<Integer,IntArrayList> entityIndex = new BlockFilteringAdvanced().run(jsc.textFile(inputPath), BLOCK_ASSIGNMENTS_ACCUM);         
+        
+        
+        //we should not remove the matched entities, since they may help identify matches in their neighborhoods!
+        
+        //remove already matched entities from entity index        
+        //JavaPairRDD<Integer, Integer> matchesFromLabelsReversed = matchesFromLabels.mapToPair(x->x.swap());                
+        //entityIndex = entityIndex.subtractByKey(matchesFromLabels).subtractByKey(matchesFromLabelsReversed);        
         entityIndex.setName("entityIndex").cache();
         
-        //remove already matches entities from entity index
-        entityIndex = entityIndex.subtractByKey(matchesFromLabels);
-        //entityIndex = entityIndex.subtractByKey(matchesFromLabels.values());
         
         //Blocks From Entity Index
         System.out.println("\n\nStarting BlocksFromEntityIndex...");                
         LongAccumulator CLEAN_BLOCK_ACCUM = jsc.sc().longAccumulator();
-        LongAccumulator NUM_COMPARISONS_ACCUM = jsc.sc().longAccumulator();        
-        BlocksFromEntityIndex bFromEI = new BlocksFromEntityIndex();
-        JavaPairRDD<Integer, IntArrayList> blocksFromEI = bFromEI.run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
+        LongAccumulator NUM_COMPARISONS_ACCUM = jsc.sc().longAccumulator();                
+        JavaPairRDD<Integer, IntArrayList> blocksFromEI = new BlocksFromEntityIndex().run(entityIndex, CLEAN_BLOCK_ACCUM, NUM_COMPARISONS_ACCUM);
         blocksFromEI.setName("blocksFromEI").cache(); //a few hundred MBs        
         
-        System.out.println(blocksFromEI.count()+" have been left after block filtering");
+        System.out.println(blocksFromEI.count()+" blocks have been left after block filtering");
         
         double BCin = (double) BLOCK_ASSIGNMENTS_ACCUM.value() / entityIndex.count(); //BCin = average number of block assignments per entity
         final int K = (args.length >= 7) ? Integer.parseInt(args[6]) : Math.max(1, ((Double)Math.floor(BCin)).intValue()); //K = |_BCin -1_|        
@@ -155,31 +169,39 @@ public class MetablockingAndReciprocalMatchingARCSWithLabelHeuristic {
         System.out.println("\n\nStarting CNP...");        
         final float MIN_SUPPORT_THRESHOLD = 0.01f;
         final int N = (args.length >= 8) ? Integer.parseInt(args[7]) : 5; //top-N relations
+        System.out.println("N = "+N);
         
         System.out.println("Getting the top K value candidates...");
         EntityBasedCNPNeighborsARCS cnp = new EntityBasedCNPNeighborsARCS();        
         JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates = cnp.getTopKValueSims(blocksFromEI, K);
         
         blocksFromEI.unpersist();        
+        //topKValueCandidates.setName("topKValueCandidates").persist(StorageLevel.MEMORY_AND_DISK_SER());
         
         System.out.println("Getting the top K neighbor candidates...");
         JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKNeighborCandidates = cnp.run2(
                 topKValueCandidates, 
-                jsc.textFile(inputTriples1, PARALLELISM), 
-                jsc.textFile(inputTriples2, PARALLELISM), 
+                triples1, 
+                triples2, 
                 SEPARATOR, 
-                jsc.textFile(entityIds1),
-                jsc.textFile(entityIds2),
+                ids1,
+                ids2,
                 MIN_SUPPORT_THRESHOLD, K, N, 
                 jsc);
         
+        triples1.unpersist();
+        triples2.unpersist();
+        
         //reciprocal matching
         System.out.println("Starting reciprocal matching...");
-        JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatches(topKValueCandidates, topKNeighborCandidates);
-                
-        System.out.println("Writing results to HDFS...");
-        matches.saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)        
-        System.out.println("Job finished successfully. Output written in "+outputPath);
+        //JavaPairRDD<Integer,IntArrayList> candidateMatches = new ReciprocalMatchingFromMetaBlocking().getReciprocalCandidateMatches(topKValueCandidates, topKNeighborCandidates);
+        //JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatchesFromTop1Candidates(topKValueCandidates, topKNeighborCandidates);                
+        JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking()
+                .getReciprocalMatches(topKValueCandidates, topKNeighborCandidates)
+                .subtractByKey(matchesFromLabels)
+                .union(matchesFromLabels);
+        
+        matches.saveAsTextFile(outputPath);
         
         spark.stop();
     }
