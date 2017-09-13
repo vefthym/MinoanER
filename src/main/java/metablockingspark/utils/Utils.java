@@ -200,9 +200,9 @@ public class Utils {
      * @return 
      */
     public static SparkSession setUpSpark(String appName, int parallelismFactor, String tmpPath) {
-        final int NUM_CORES_IN_CLUSTER = 152; //152 in ISL cluster, 28 in okeanos cluster (for speedup 152,114,72,36)
+        final int NUM_CORES_IN_CLUSTER = 144; //152 in ISL cluster, 28 in okeanos cluster (for speedup 144,108,72,36)
         final int NUM_WORKERS = 4; //4 in ISL cluster, 14 in okeanos cluster
-        final int NUM_EXECUTORS = NUM_WORKERS * 3;
+        final int NUM_EXECUTORS = NUM_WORKERS * 3; //standard: NUM_WORKERS *3
         final int NUM_EXECUTOR_CORES = NUM_CORES_IN_CLUSTER/NUM_EXECUTORS;
         final int PARALLELISM = NUM_EXECUTORS * NUM_EXECUTOR_CORES * parallelismFactor; //spark tuning documentation suggests 2 or 3, unless OOM error (in that case more)
                        
@@ -210,14 +210,14 @@ public class Utils {
             .appName(appName) 
             .config("spark.sql.warehouse.dir", tmpPath)
             .config("spark.eventLog.enabled", true)
-            .config("spark.default.parallelism", PARALLELISM) //x tasks for each core --> x "reduce" rounds
+            .config("spark.default.parallelism", 144*3) //x tasks for each core --> x "reduce" rounds (keep this fixed for speedup tests), oherwise (set: PARALLELISM)
             .config("spark.rdd.compress", true)
             .config("spark.network.timeout", "600s")
             .config("spark.executor.heartbeatInterval", "20s")    
                 
             .config("spark.executor.instances", NUM_EXECUTORS)
             .config("spark.executor.cores", NUM_EXECUTOR_CORES) //speedup tests: 12,9,6,3 OR 12,8,4,1
-            .config("spark.executor.memory", "55G")
+            .config("spark.executor.memory", "55G") //55G is fine in ISL cluster
             
             .config("spark.driver.maxResultSize", "2g")
             
