@@ -37,6 +37,8 @@ entityIdFromD1 <i>TAB</i> entityIdFromD2 <br/>
 for each pair of entities that have been found to match. <br/>
 WARNING: the outputPath directory is deleted on each run. 
 
+You can find examples of datasets used in MinoanER in our project's website: http://csd.uoc.gr/~vefthym/minoanER/datasets.html.
+
 
 # Setup and Tuning
 
