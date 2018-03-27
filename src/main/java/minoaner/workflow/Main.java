@@ -168,7 +168,7 @@ public class Main {
         //CNP (Cardinality Node Pruning is a Meta-blocking pruning scheme. It keeps the top-K candidates of each entity and prunes the rest.)
         System.out.println("\n\nStarting CNP...");        
         final float MIN_SUPPORT_THRESHOLD = 0.01f;
-        final int N = (args.length >= 8) ? Integer.parseInt(args[7]) : 5; //top-N relations
+        final int N = (args.length >= 8) ? Integer.parseInt(args[7]) : 3; //top-N relations
         System.out.println("N = "+N);
         
         System.out.println("Getting the top K value candidates...");
@@ -193,10 +193,10 @@ public class Main {
         triples2.unpersist();
         
         //Matching
-        
+        final float valueFactor = (args.length >= 9) ? Integer.parseInt(args[8]) : 0.6f; //the weight of values vs neighbors for the rank aggregation (linear combination)        
         System.out.println("Starting reciprocal matching...");        
         JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking()
-                .getReciprocalMatches(topKValueCandidates, topKNeighborCandidates, 0.6F)
+                .getReciprocalMatches(topKValueCandidates, topKNeighborCandidates, valueFactor)
                 .subtractByKey(matchesFromLabels) //delete the entities, whose matches have been already found from the label heuristic
                 .union(matchesFromLabels); //and then add the matches of those entities from the label heuristic
         

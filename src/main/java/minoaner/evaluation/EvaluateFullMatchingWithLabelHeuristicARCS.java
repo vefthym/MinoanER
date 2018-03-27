@@ -151,7 +151,7 @@ public class EvaluateFullMatchingWithLabelHeuristicARCS extends BlockingEvaluati
         //CNP
         System.out.println("\n\nStarting CNP...");        
         final float MIN_SUPPORT_THRESHOLD = 0.01f;
-        final int N = (args.length >= 8) ? Integer.parseInt(args[7]) : 5; //top-N relations
+        final int N = (args.length >= 8) ? Integer.parseInt(args[7]) : 3; //top-N relations
         System.out.println("N = "+N);
         final float valueFactor = (args.length >= 9) ? Integer.parseInt(args[8]) : 0.6f; //the weight of values vs neighbors for the rank aggregation (linear combination)
         
