@@ -193,7 +193,7 @@ public class Main {
         triples2.unpersist();
         
         //Matching
-        final float valueFactor = (args.length >= 9) ? Integer.parseInt(args[8]) : 0.6f; //the weight of values vs neighbors for the rank aggregation (linear combination)        
+        final float valueFactor = (args.length >= 9) ? Float.parseFloat(args[8]) : 0.6f; //the weight of values vs neighbors for the rank aggregation (linear combination)        
         System.out.println("Starting reciprocal matching...");        
         JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking()
                 .getReciprocalMatches(topKValueCandidates, topKNeighborCandidates, valueFactor)

@@ -217,7 +217,7 @@ public class Utils {
                 
             .config("spark.executor.instances", NUM_EXECUTORS)
             .config("spark.executor.cores", NUM_EXECUTOR_CORES) //speedup tests: 12,9,6,3 OR 12,8,4,1
-            .config("spark.executor.memory", "65G") //55G is fine in ISL cluster
+            .config("spark.executor.memory", "70G") //55G is fine in ISL cluster
             
             .config("spark.driver.maxResultSize", "2g")
             
