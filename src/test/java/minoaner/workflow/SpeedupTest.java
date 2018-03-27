@@ -221,7 +221,7 @@ public class SpeedupTest {
         System.out.println("Starting reciprocal matching...");
         
         JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking()
-                .getReciprocalMatches(topKValueCandidates, topKNeighborCandidates)
+                .getReciprocalMatches(topKValueCandidates, topKNeighborCandidates, 0.6F)
                 .subtractByKey(matchesFromLabels)
                 .union(matchesFromLabels);
         

@@ -32,9 +32,10 @@ public class ReciprocalMatchingFromMetaBlocking {
      * sums the ranks, instead of similarity scores
      * @param topKValueCandidates
      * @param topKNeighborCandidates
+     * @param valueFactor the weight of values vs neighbors for the rank aggregation (linear combination)
      * @return 
      */
-    public JavaPairRDD<Integer, Integer> getReciprocalMatches(JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKNeighborCandidates) {
+    public JavaPairRDD<Integer, Integer> getReciprocalMatches(JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKValueCandidates, JavaPairRDD<Integer, Int2FloatLinkedOpenHashMap> topKNeighborCandidates, float valueFactor) {
         
         //value heuristic
         JavaPairRDD<Integer,Integer> matchesFromTop1Value = topKValueCandidates
@@ -43,8 +44,7 @@ public class ReciprocalMatchingFromMetaBlocking {
         
         System.out.println("Found "+matchesFromTop1Value.count()+" match suggestions from top-1 value sim > 1 from collection 2");    
                 
-        //rank aggregation heuristic
-        float valueFactor = 0.6f; //the weight of values vs neighbors for the rank aggregation (linear combination)
+        //rank aggregation heuristic        
         System.out.println("Value factor = "+valueFactor);
         
         topKValueCandidates = topKValueCandidates.subtractByKey(matchesFromTop1Value)

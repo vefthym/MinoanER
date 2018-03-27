@@ -141,7 +141,7 @@ public class EvaluateMatchingWithoutRankAggrARCS extends BlockingEvaluation {
         System.out.println("Starting reciprocal matching...");
         //JavaPairRDD<Integer,IntArrayList> candidateMatches = new ReciprocalMatchingFromMetaBlocking().getReciprocalCandidateMatches(topKValueCandidates, topKNeighborCandidates);
         //JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatchesFromTop1Candidates(topKValueCandidates, topKNeighborCandidates);                
-        JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatches(topKValueCandidates, topKNeighborCandidates);
+        JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatches(topKValueCandidates, topKNeighborCandidates, 0.6F);
         
         topKValueCandidates.unpersist();
         

@@ -202,7 +202,7 @@ public class Utils {
      * @return 
      */
     public static SparkSession setUpSpark(String appName, int NUM_CORES_IN_CLUSTER, int NUM_WORKERS, int parallelismFactor, String tmpPath) {
-        final int NUM_EXECUTORS = NUM_WORKERS * 3; //standard: NUM_WORKERS *3
+        final int NUM_EXECUTORS = NUM_WORKERS * 2; //standard: NUM_WORKERS *3
         final int NUM_EXECUTOR_CORES = NUM_CORES_IN_CLUSTER/NUM_EXECUTORS;
         final int PARALLELISM = NUM_EXECUTORS * NUM_EXECUTOR_CORES * parallelismFactor;
                        
@@ -212,12 +212,12 @@ public class Utils {
             .config("spark.eventLog.enabled", true)
             .config("spark.default.parallelism", PARALLELISM) //x tasks for each core --> x "reduce" rounds (keep this fixed for speedup tests), oherwise (set: PARALLELISM)
             .config("spark.rdd.compress", true)
-            .config("spark.network.timeout", "600s")
+            .config("spark.network.timeout", "800s")
             .config("spark.executor.heartbeatInterval", "20s")    
                 
             .config("spark.executor.instances", NUM_EXECUTORS)
             .config("spark.executor.cores", NUM_EXECUTOR_CORES) //speedup tests: 12,9,6,3 OR 12,8,4,1
-            .config("spark.executor.memory", "55G") //55G is fine in ISL cluster
+            .config("spark.executor.memory", "65G") //55G is fine in ISL cluster
             
             .config("spark.driver.maxResultSize", "2g")
             

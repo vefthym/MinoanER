@@ -180,7 +180,7 @@ public class EvaluateFullMatchingWithLabelHeuristicARCS extends BlockingEvaluati
         //JavaPairRDD<Integer,IntArrayList> candidateMatches = new ReciprocalMatchingFromMetaBlocking().getReciprocalCandidateMatches(topKValueCandidates, topKNeighborCandidates);
         //JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatchesFromTop1Candidates(topKValueCandidates, topKNeighborCandidates);                
         JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking()
-                .getReciprocalMatches(topKValueCandidates, topKNeighborCandidates)
+                .getReciprocalMatches(topKValueCandidates, topKNeighborCandidates, 0.6F)
                 .subtractByKey(matchesFromLabels)
                 .union(matchesFromLabels);
         

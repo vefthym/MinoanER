@@ -196,7 +196,7 @@ public class Main {
         
         System.out.println("Starting reciprocal matching...");        
         JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking()
-                .getReciprocalMatches(topKValueCandidates, topKNeighborCandidates)
+                .getReciprocalMatches(topKValueCandidates, topKNeighborCandidates, 0.6F)
                 .subtractByKey(matchesFromLabels) //delete the entities, whose matches have been already found from the label heuristic
                 .union(matchesFromLabels); //and then add the matches of those entities from the label heuristic
         

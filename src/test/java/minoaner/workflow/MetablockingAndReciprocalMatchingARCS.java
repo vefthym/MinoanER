@@ -150,7 +150,7 @@ public class MetablockingAndReciprocalMatchingARCS {
         
         //reciprocal matching
         System.out.println("Starting reciprocal matching...");
-        JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatches(topKValueCandidates, topKNeighborCandidates);
+        JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatches(topKValueCandidates, topKNeighborCandidates, 0.6F);
                 
         System.out.println("Writing results to HDFS...");
         matches.saveAsTextFile(outputPath); //only to see the output and add an action (saving to file may not be needed)        

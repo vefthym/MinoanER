@@ -153,6 +153,7 @@ public class EvaluateFullMatchingWithLabelHeuristicARCS extends BlockingEvaluati
         final float MIN_SUPPORT_THRESHOLD = 0.01f;
         final int N = (args.length >= 8) ? Integer.parseInt(args[7]) : 5; //top-N relations
         System.out.println("N = "+N);
+        final float valueFactor = (args.length >= 9) ? Integer.parseInt(args[8]) : 0.6f; //the weight of values vs neighbors for the rank aggregation (linear combination)
         
         System.out.println("Getting the top K value candidates...");
         CNPARCS cnp = new CNPARCS();        
@@ -180,7 +181,7 @@ public class EvaluateFullMatchingWithLabelHeuristicARCS extends BlockingEvaluati
         //JavaPairRDD<Integer,IntArrayList> candidateMatches = new ReciprocalMatchingFromMetaBlocking().getReciprocalCandidateMatches(topKValueCandidates, topKNeighborCandidates);
         //JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking().getReciprocalMatchesFromTop1Candidates(topKValueCandidates, topKNeighborCandidates);                
         JavaPairRDD<Integer,Integer> matches = new ReciprocalMatchingFromMetaBlocking()
-                .getReciprocalMatches(topKValueCandidates, topKNeighborCandidates)
+                .getReciprocalMatches(topKValueCandidates, topKNeighborCandidates, valueFactor)
                 .subtractByKey(matchesFromLabels)
                 .union(matchesFromLabels);
         
