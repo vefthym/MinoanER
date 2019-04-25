@@ -12,6 +12,11 @@ The steps followed by MinoanER are Blocking, Meta-blocking and Matching.
 Currently, the step of (token) blocking is taken from https://github.com/vefthym/ERframework/blob/master/src/NewApproaches/ExportDatasets.java
 but it can be easily incorporated in this repository, as a Spak task, as well. 
 
+To cite this work, please use the following reference: <br/>
+"Vasilis Efthymiou, George Papadakis, Kostas Stefanidis, Vassilis Christophides:
+MinoanER: Schema-Agnostic, Non-Iterative, Massively Parallel Resolution of Web Entities. EDBT 2019: 373-384" <br/>
+Pdf available here: https://openproceedings.org/2019/conf/edbt/EDBT19_paper_44.pdf
+
 
 # Running MinoanER
 The main file is https://github.com/vefthym/MinoanER/blob/master/src/main/java/minoaner/workflow/Main.java. 
