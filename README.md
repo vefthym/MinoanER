@@ -12,6 +12,7 @@ The steps followed by MinoanER are Blocking, Meta-blocking and Matching.
 Currently, the step of (token) blocking is taken from https://github.com/vefthym/ERframework/blob/master/src/NewApproaches/ExportDatasets.java
 but it can be easily incorporated in this repository, as a Spak task, as well. 
 
+# Reference
 To cite this work, please use the following reference: <br/>
 "Vasilis Efthymiou, George Papadakis, Kostas Stefanidis, Vassilis Christophides:
 MinoanER: Schema-Agnostic, Non-Iterative, Massively Parallel Resolution of Web Entities. EDBT 2019: 373-384" <br/>
@@ -42,7 +43,17 @@ entityIdFromD1 <i>TAB</i> entityIdFromD2 <br/>
 for each pair of entities that have been found to match. <br/>
 WARNING: the outputPath directory is deleted on each run. 
 
+<b>Example datasets:</b> <br/> 
 You can find examples of datasets used in MinoanER in our project's website: http://csd.uoc.gr/~vefthym/minoanER/datasets.html.
+If you use those datasets, here are some helpful tips for pre-processing the data: 
+
+You can covert RDF files into classes of the form EntityProfile using this <a href="https://github.com/vefthym/ERframework/blob/master/src/DataReader/EntityReader/EntityRDFReader.java
+">DataReader</a>. 
+There is <a href="https://github.com/vefthym/ERframework/blob/master/src/DataReader/GroundTruthReader/GtRDFReader.java">another reader for the ground-truth files</a>.
+
+ 
+
+Both readers have a storeSerializedObject method to store the result on the disk.
 
 
 # Setup and Tuning
